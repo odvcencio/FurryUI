@@ -581,11 +581,27 @@ func (h *heroDemo) Layout(bounds runtime.Rect) {
 	h.Component.Layout(bounds)
 }
 
+// Rainbow colors for the rotating border
+var rainbowColors = []backend.Color{
+	backend.ColorBrightRed,
+	backend.ColorBrightYellow,
+	backend.ColorBrightGreen,
+	backend.ColorBrightCyan,
+	backend.ColorBrightBlue,
+	backend.ColorBrightMagenta,
+}
+
+// Border characters - stars, sparkles, diamonds
+var borderChars = []rune{'★', '✦', '◆', '✧', '❖', '✶', '◇', '✴', '❋', '✸'}
+
 func (h *heroDemo) Render(ctx runtime.RenderContext) {
 	bounds := h.Bounds()
 	ctx.Clear(backend.DefaultStyle())
 
-	// ASCII art title
+	// Draw rotating rainbow border
+	h.drawRainbowBorder(ctx, bounds)
+
+	// ASCII art title with color
 	title := []string{
 		" _____ _       __  __       _   _ ___ ",
 		"|  ___| |_   _ / _|/ _|_   _| | | |_ _|",
@@ -595,10 +611,12 @@ func (h *heroDemo) Render(ctx runtime.RenderContext) {
 		"                      |___/           ",
 	}
 
-	startY := bounds.Y + 2
+	startY := bounds.Y + 3
+	titleColor := rainbowColors[(h.frame/8)%len(rainbowColors)]
 	for i, line := range title {
 		x := (bounds.Width - len(line)) / 2
-		ctx.Buffer.SetString(x, startY+i, line, backend.DefaultStyle().Bold(true))
+		style := backend.DefaultStyle().Bold(true).Foreground(titleColor)
+		ctx.Buffer.SetString(x, startY+i, line, style)
 	}
 
 	// Subtitle
@@ -606,7 +624,7 @@ func (h *heroDemo) Render(ctx runtime.RenderContext) {
 	x := (bounds.Width - len(subtitle)) / 2
 	ctx.Buffer.SetString(x, startY+7, subtitle, backend.DefaultStyle().Dim(true))
 
-	// Features (animated)
+	// Features (animated) with colorful bullets
 	features := []string{
 		"35+ Ready-to-Use Widgets",
 		"Reactive State Management",
@@ -615,23 +633,68 @@ func (h *heroDemo) Render(ctx runtime.RenderContext) {
 	}
 
 	featureY := startY + 10
-	visibleFeatures := (h.frame / 20) % (len(features) + 1)
+	visibleFeatures := (h.frame / 15) % (len(features) + 1)
 	if visibleFeatures > len(features) {
 		visibleFeatures = len(features)
 	}
 
 	for i := 0; i < visibleFeatures; i++ {
 		fx := (bounds.Width - len(features[i]) - 4) / 2
-		ctx.Buffer.SetString(fx, featureY+i, "[*] "+features[i], backend.DefaultStyle())
+		bulletColor := rainbowColors[(i+h.frame/10)%len(rainbowColors)]
+		bulletStyle := backend.DefaultStyle().Foreground(bulletColor).Bold(true)
+		textStyle := backend.DefaultStyle()
+		ctx.Buffer.SetString(fx, featureY+i, "★ ", bulletStyle)
+		ctx.Buffer.SetString(fx+2, featureY+i, features[i], textStyle)
 	}
 
-	// Install command
+	// Install command with pulsing highlight
 	installY := bounds.Y + bounds.Height - 3
-	install := "go get github.com/odvcencio/fluffy-ui"
+	install := " go get github.com/odvcencio/fluffy-ui "
 	ix := (bounds.Width - len(install)) / 2
-	ctx.Buffer.SetString(ix, installY, install, backend.DefaultStyle().Reverse(true))
+	installColor := rainbowColors[(h.frame/5)%len(rainbowColors)]
+	ctx.Buffer.SetString(ix, installY, install, backend.DefaultStyle().Background(installColor).Foreground(backend.ColorBlack).Bold(true))
+}
 
-	ctx.Buffer.DrawBox(bounds, backend.DefaultStyle())
+func (h *heroDemo) drawRainbowBorder(ctx runtime.RenderContext, bounds runtime.Rect) {
+	// Calculate total perimeter positions
+	width := bounds.Width
+	height := bounds.Height
+
+	// Top edge (left to right)
+	for i := 0; i < width; i++ {
+		pos := (i + h.frame) % (len(borderChars) * len(rainbowColors))
+		char := borderChars[pos%len(borderChars)]
+		color := rainbowColors[(pos/2)%len(rainbowColors)]
+		style := backend.DefaultStyle().Foreground(color).Bold(true)
+		ctx.Buffer.Set(bounds.X+i, bounds.Y, char, style)
+	}
+
+	// Bottom edge (left to right)
+	for i := 0; i < width; i++ {
+		pos := (i - h.frame + 1000) % (len(borderChars) * len(rainbowColors)) // Reverse direction
+		char := borderChars[pos%len(borderChars)]
+		color := rainbowColors[(pos/2)%len(rainbowColors)]
+		style := backend.DefaultStyle().Foreground(color).Bold(true)
+		ctx.Buffer.Set(bounds.X+i, bounds.Y+height-1, char, style)
+	}
+
+	// Left edge (top to bottom)
+	for i := 1; i < height-1; i++ {
+		pos := (i + h.frame) % (len(borderChars) * len(rainbowColors))
+		char := borderChars[pos%len(borderChars)]
+		color := rainbowColors[(pos/2)%len(rainbowColors)]
+		style := backend.DefaultStyle().Foreground(color).Bold(true)
+		ctx.Buffer.Set(bounds.X, bounds.Y+i, char, style)
+	}
+
+	// Right edge (top to bottom)
+	for i := 1; i < height-1; i++ {
+		pos := (i - h.frame + 1000) % (len(borderChars) * len(rainbowColors)) // Reverse direction
+		char := borderChars[pos%len(borderChars)]
+		color := rainbowColors[(pos/2)%len(rainbowColors)]
+		style := backend.DefaultStyle().Foreground(color).Bold(true)
+		ctx.Buffer.Set(bounds.X+width-1, bounds.Y+i, char, style)
+	}
 }
 
 func (h *heroDemo) HandleMessage(msg runtime.Message) runtime.HandleResult {

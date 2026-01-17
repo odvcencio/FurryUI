@@ -382,11 +382,28 @@ Pre-recorded demos are available in `docs/demos/` as asciicast files:
 ```bash
 # View a demo (requires asciinema)
 asciinema play docs/demos/hero.cast
+```
 
-# Generate all demos
+### Recording Tools
+
+FluffyUI includes two Go-based recording tools:
+
+| Tool | Description |
+|------|-------------|
+| `examples/generate-demos` | Headless demo generation using simulation backend (CI-friendly) |
+| `scripts/record-demos` | Record real examples with terminal interaction |
+
+```bash
+# Generate widget demos (no terminal required, great for CI)
 go run ./examples/generate-demos --out docs/demos
 
-# Convert to GIF (requires agg)
+# Record real examples (requires terminal)
+go run ./scripts/record-demos --duration 5s
+
+# Record specific demos only
+go run ./scripts/record-demos --demo quickstart,counter
+
+# Convert to GIF (requires agg: cargo install --git https://github.com/asciinema/agg)
 agg --theme monokai docs/demos/hero.cast docs/demos/hero.gif
 ```
 
