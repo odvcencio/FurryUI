@@ -112,22 +112,90 @@ func recordDemo(path string, root runtime.Widget) error {
 // =============================================================================
 
 func demoButtons() runtime.Widget {
-	grid := widgets.NewGrid(4, 3)
-	grid.Gap = 1
+	return &buttonsDemo{}
+}
 
-	grid.Add(widgets.NewLabel("FluffyUI Button Variants").WithStyle(backend.DefaultStyle().Bold(true)), 0, 0, 1, 3)
+type buttonsDemo struct {
+	widgets.Component
+	frame   int
+	focused int
+}
 
-	grid.Add(widgets.NewButton("Primary", widgets.WithVariant(widgets.VariantPrimary)), 1, 0, 1, 1)
-	grid.Add(widgets.NewButton("Secondary", widgets.WithVariant(widgets.VariantSecondary)), 1, 1, 1, 1)
-	grid.Add(widgets.NewButton("Danger", widgets.WithVariant(widgets.VariantDanger)), 1, 2, 1, 1)
+func (b *buttonsDemo) Measure(constraints runtime.Constraints) runtime.Size {
+	return constraints.MaxSize()
+}
 
-	grid.Add(widgets.NewButton("Default"), 2, 0, 1, 1)
-	disabledState := state.NewSignal(true)
-	grid.Add(widgets.NewButton("Disabled", widgets.WithDisabled(disabledState)), 2, 1, 1, 1)
+func (b *buttonsDemo) Layout(bounds runtime.Rect) {
+	b.Component.Layout(bounds)
+}
 
-	grid.Add(widgets.NewLabel("Press Tab to navigate, Enter to activate").WithStyle(backend.DefaultStyle().Dim(true)), 3, 0, 1, 3)
+func (b *buttonsDemo) Render(ctx runtime.RenderContext) {
+	bounds := b.Bounds()
+	ctx.Clear(backend.DefaultStyle())
 
-	return widgets.NewPanel(grid).WithBorder(backend.DefaultStyle()).WithTitle("Buttons Demo")
+	// Title
+	ctx.Buffer.SetString(bounds.X+2, bounds.Y+1, "FluffyUI Button Variants", backend.DefaultStyle().Bold(true))
+
+	// Button definitions with colors
+	buttons := []struct {
+		label string
+		style backend.Style
+	}{
+		{"Primary", backend.DefaultStyle().Foreground(backend.ColorBlack).Background(backend.ColorCyan).Bold(true)},
+		{"Secondary", backend.DefaultStyle().Foreground(backend.ColorWhite).Background(backend.ColorBlue)},
+		{"Danger", backend.DefaultStyle().Foreground(backend.ColorWhite).Background(backend.ColorRed).Bold(true)},
+		{"Success", backend.DefaultStyle().Foreground(backend.ColorBlack).Background(backend.ColorGreen).Bold(true)},
+		{"Warning", backend.DefaultStyle().Foreground(backend.ColorBlack).Background(backend.ColorYellow)},
+	}
+
+	y := bounds.Y + 3
+	x := bounds.X + 2
+	for i, btn := range buttons {
+		style := btn.style
+		// Highlight focused button
+		if i == b.focused {
+			style = style.Reverse(true)
+		}
+		label := fmt.Sprintf(" [%s] ", btn.label)
+		ctx.Buffer.SetString(x, y, label, style)
+		x += len(label) + 2
+	}
+
+	// Second row: default and disabled
+	y += 2
+	x = bounds.X + 2
+
+	defaultStyle := backend.DefaultStyle()
+	if b.focused == 5 {
+		defaultStyle = defaultStyle.Reverse(true)
+	}
+	ctx.Buffer.SetString(x, y, " [Default] ", defaultStyle)
+	x += 13
+
+	disabledStyle := backend.DefaultStyle().Dim(true)
+	ctx.Buffer.SetString(x, y, " [Disabled] ", disabledStyle)
+
+	// Instructions
+	ctx.Buffer.SetString(bounds.X+2, bounds.Y+7, "Tab cycles focus, Enter activates", backend.DefaultStyle().Dim(true))
+
+	// Focus indicator
+	focusText := fmt.Sprintf("Focus: %d/6", b.focused+1)
+	ctx.Buffer.SetString(bounds.X+2, bounds.Y+9, focusText, backend.DefaultStyle())
+
+	ctx.Buffer.DrawBox(bounds, backend.DefaultStyle())
+}
+
+func (b *buttonsDemo) HandleMessage(msg runtime.Message) runtime.HandleResult {
+	if _, ok := msg.(runtime.TickMsg); ok {
+		b.frame++
+		// Cycle focus every ~500ms (15 frames at 30fps)
+		if b.frame%15 == 0 {
+			b.focused = (b.focused + 1) % 6
+			b.Invalidate()
+		}
+		return runtime.Handled()
+	}
+	return runtime.Unhandled()
 }
 
 func demoCounter() runtime.Widget {
@@ -181,22 +249,101 @@ func (c *counterDemo) HandleMessage(msg runtime.Message) runtime.HandleResult {
 }
 
 func demoTable() runtime.Widget {
-	table := widgets.NewTable(
-		widgets.TableColumn{Title: "Name", Width: 15},
-		widgets.TableColumn{Title: "Type", Width: 12},
-		widgets.TableColumn{Title: "Price", Width: 10},
-		widgets.TableColumn{Title: "Stock", Width: 8},
-	)
-	table.SetRows([][]string{
+	return &tableDemo{}
+}
+
+type tableDemo struct {
+	widgets.Component
+	frame    int
+	selected int
+}
+
+func (t *tableDemo) Measure(constraints runtime.Constraints) runtime.Size {
+	return constraints.MaxSize()
+}
+
+func (t *tableDemo) Layout(bounds runtime.Rect) {
+	t.Component.Layout(bounds)
+}
+
+func (t *tableDemo) Render(ctx runtime.RenderContext) {
+	bounds := t.Bounds()
+	ctx.Clear(backend.DefaultStyle())
+
+	// Column definitions
+	columns := []struct {
+		title string
+		width int
+	}{
+		{"Name", 15},
+		{"Type", 12},
+		{"Price", 10},
+		{"Stock", 8},
+	}
+
+	rows := [][]string{
 		{"Gummy Bears", "Candy", "$2.99", "150"},
 		{"Chocolate Bar", "Candy", "$4.50", "89"},
 		{"Sour Straws", "Candy", "$1.99", "234"},
 		{"Lollipops", "Candy", "$0.99", "500"},
 		{"Jawbreakers", "Candy", "$3.25", "45"},
 		{"Energy Drink", "Beverage", "$5.99", "120"},
-	})
+	}
 
-	return widgets.NewPanel(table).WithBorder(backend.DefaultStyle()).WithTitle("Data Table")
+	// Title
+	ctx.Buffer.SetString(bounds.X+2, bounds.Y+1, "Data Table", backend.DefaultStyle().Bold(true))
+
+	// Header
+	y := bounds.Y + 3
+	x := bounds.X + 2
+	headerStyle := backend.DefaultStyle().Bold(true).Underline(true)
+	for _, col := range columns {
+		title := col.title
+		for len(title) < col.width {
+			title += " "
+		}
+		ctx.Buffer.SetString(x, y, title, headerStyle)
+		x += col.width + 1
+	}
+
+	// Rows
+	for rowIdx, row := range rows {
+		y++
+		x = bounds.X + 2
+		style := backend.DefaultStyle()
+		if rowIdx == t.selected {
+			style = style.Reverse(true).Bold(true)
+		}
+		for colIdx, col := range columns {
+			cell := ""
+			if colIdx < len(row) {
+				cell = row[colIdx]
+			}
+			for len(cell) < col.width {
+				cell += " "
+			}
+			ctx.Buffer.SetString(x, y, cell, style)
+			x += col.width + 1
+		}
+	}
+
+	// Navigation hint
+	ctx.Buffer.SetString(bounds.X+2, bounds.Y+bounds.Height-3, "Arrow keys to navigate rows", backend.DefaultStyle().Dim(true))
+
+	ctx.Buffer.DrawBox(bounds, backend.DefaultStyle())
+}
+
+func (t *tableDemo) HandleMessage(msg runtime.Message) runtime.HandleResult {
+	if _, ok := msg.(runtime.TickMsg); ok {
+		t.frame++
+		// Cycle selection every ~400ms (12 frames at 30fps)
+		if t.frame%12 == 0 {
+			t.selected = (t.selected + 1) % 6
+			t.Invalidate()
+		}
+		return runtime.Handled()
+	}
+	return runtime.Unhandled()
 }
 
 func demoProgress() runtime.Widget {
@@ -266,32 +413,76 @@ func (p *progressDemo) HandleMessage(msg runtime.Message) runtime.HandleResult {
 }
 
 func demoList() runtime.Widget {
-	items := []string{
-		"First Item",
-		"Second Item",
-		"Third Item",
-		"Fourth Item",
-		"Fifth Item",
+	return &listDemo{}
+}
+
+type listDemo struct {
+	widgets.Component
+	frame    int
+	selected int
+}
+
+func (l *listDemo) Measure(constraints runtime.Constraints) runtime.Size {
+	return constraints.MaxSize()
+}
+
+func (l *listDemo) Layout(bounds runtime.Rect) {
+	l.Component.Layout(bounds)
+}
+
+func (l *listDemo) Render(ctx runtime.RenderContext) {
+	bounds := l.Bounds()
+	ctx.Clear(backend.DefaultStyle())
+
+	items := []struct {
+		icon  string
+		label string
+		desc  string
+	}{
+		{"*", "Documents", "Personal files"},
+		{"*", "Downloads", "Recent downloads"},
+		{"*", "Music", "Audio files"},
+		{"*", "Pictures", "Image gallery"},
+		{"*", "Videos", "Video collection"},
+		{"*", "Projects", "Code repositories"},
 	}
 
-	adapter := widgets.NewSliceAdapter(items, func(item string, index int, selected bool, ctx runtime.RenderContext) {
+	// Title
+	ctx.Buffer.SetString(bounds.X+2, bounds.Y+1, "Selectable List", backend.DefaultStyle().Bold(true))
+
+	y := bounds.Y + 3
+	for i, item := range items {
 		style := backend.DefaultStyle()
-		if selected {
-			style = style.Reverse(true)
-		}
 		prefix := "  "
-		if selected {
+		if i == l.selected {
+			style = style.Reverse(true).Bold(true)
 			prefix = "> "
 		}
-		text := prefix + item
-		for len(text) < ctx.Bounds.Width {
-			text += " "
+		line := fmt.Sprintf("%s%s %s - %s", prefix, item.icon, item.label, item.desc)
+		// Pad to full width
+		for len(line) < bounds.Width-4 {
+			line += " "
 		}
-		ctx.Buffer.SetString(ctx.Bounds.X, ctx.Bounds.Y, text, style)
-	})
+		ctx.Buffer.SetString(bounds.X+2, y+i, line, style)
+	}
 
-	list := widgets.NewList(adapter)
-	return widgets.NewPanel(list).WithBorder(backend.DefaultStyle()).WithTitle("Selectable List")
+	// Navigation hint
+	ctx.Buffer.SetString(bounds.X+2, bounds.Y+bounds.Height-3, "Arrow keys to navigate, Enter to select", backend.DefaultStyle().Dim(true))
+
+	ctx.Buffer.DrawBox(bounds, backend.DefaultStyle())
+}
+
+func (l *listDemo) HandleMessage(msg runtime.Message) runtime.HandleResult {
+	if _, ok := msg.(runtime.TickMsg); ok {
+		l.frame++
+		// Cycle selection every ~400ms (12 frames at 30fps)
+		if l.frame%12 == 0 {
+			l.selected = (l.selected + 1) % 6
+			l.Invalidate()
+		}
+		return runtime.Handled()
+	}
+	return runtime.Unhandled()
 }
 
 func demoDialog() runtime.Widget {
