@@ -220,11 +220,3 @@ func (b *Box) ChildWidgets() []runtime.Widget {
 	}
 	return []runtime.Widget{b.child}
 }
-
-// max returns the larger of two ints.
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}

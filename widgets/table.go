@@ -46,9 +46,17 @@ func (t *Table) SetRows(rows [][]string) {
 	t.Rows = rows
 }
 
+// SelectedIndex returns the currently selected row index.
+func (t *Table) SelectedIndex() int {
+	if t == nil {
+		return 0
+	}
+	return t.selected
+}
+
 // Measure returns the desired size.
 func (t *Table) Measure(constraints runtime.Constraints) runtime.Size {
-	height := minInt(len(t.Rows)+1, constraints.MaxHeight)
+	height := min(len(t.Rows)+1, constraints.MaxHeight)
 	if height <= 0 {
 		height = constraints.MinHeight
 	}

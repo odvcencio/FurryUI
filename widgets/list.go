@@ -16,9 +16,6 @@ type ListAdapter[T any] interface {
 	Count() int
 	Item(index int) T
 	Render(item T, index int, selected bool, ctx runtime.RenderContext)
-	Filter(query string) []int
-	Sort(column string, asc bool)
-	Key(item T) string
 }
 
 // SliceAdapter adapts a slice to a ListAdapter.
@@ -55,19 +52,6 @@ func (s *SliceAdapter[T]) Render(item T, index int, selected bool, ctx runtime.R
 		return
 	}
 	s.render(item, index, selected, ctx)
-}
-
-// Filter returns nil for slice adapters.
-func (s *SliceAdapter[T]) Filter(query string) []int {
-	return nil
-}
-
-// Sort is a no-op for slice adapters.
-func (s *SliceAdapter[T]) Sort(column string, asc bool) {}
-
-// Key returns an empty key for slice adapters.
-func (s *SliceAdapter[T]) Key(item T) string {
-	return ""
 }
 
 // SignalAdapter adapts a signal slice to a ListAdapter.
@@ -110,19 +94,6 @@ func (s *SignalAdapter[T]) Render(item T, index int, selected bool, ctx runtime.
 	s.render(item, index, selected, ctx)
 }
 
-// Filter returns nil for signal adapters.
-func (s *SignalAdapter[T]) Filter(query string) []int {
-	return nil
-}
-
-// Sort is a no-op for signal adapters.
-func (s *SignalAdapter[T]) Sort(column string, asc bool) {}
-
-// Key returns an empty key for signal adapters.
-func (s *SignalAdapter[T]) Key(item T) string {
-	return ""
-}
-
 // List renders a list of items.
 type List[T any] struct {
 	FocusableBase
@@ -158,7 +129,7 @@ func (l *List[T]) Measure(constraints runtime.Constraints) runtime.Size {
 	if l != nil && l.adapter != nil {
 		count = l.adapter.Count()
 	}
-	height := minInt(count, constraints.MaxHeight)
+	height := min(count, constraints.MaxHeight)
 	if height <= 0 {
 		height = constraints.MinHeight
 	}
@@ -275,7 +246,7 @@ func (l *List[T]) SetSelected(index int) {
 // SelectedIndex returns the current selection index.
 func (l *List[T]) SelectedIndex() int {
 	if l == nil {
-		return -1
+		return 0
 	}
 	return l.selected
 }

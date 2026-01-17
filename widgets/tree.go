@@ -53,7 +53,7 @@ func (t *Tree) SetRoot(root *TreeNode) {
 // Measure returns desired size.
 func (t *Tree) Measure(constraints runtime.Constraints) runtime.Size {
 	count := len(t.flatten())
-	height := minInt(count, constraints.MaxHeight)
+	height := min(count, constraints.MaxHeight)
 	if height <= 0 {
 		height = constraints.MinHeight
 	}

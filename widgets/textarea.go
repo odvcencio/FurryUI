@@ -90,7 +90,7 @@ func (t *TextArea) Render(ctx runtime.RenderContext) {
 
 	lineStarts, lineLengths := t.lineMeta()
 	line, col := t.cursorLineCol(lineStarts, lineLengths)
-	t.scrollY = clampInt(t.scrollY, 0, maxInt(0, len(lineStarts)-1))
+	t.scrollY = min(max(t.scrollY, 0), max(0, len(lineStarts)-1))
 	if line < t.scrollY {
 		t.scrollY = line
 	} else if line >= t.scrollY+bounds.Height {

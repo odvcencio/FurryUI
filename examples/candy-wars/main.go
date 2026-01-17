@@ -23,6 +23,7 @@ import (
 	"github.com/odvcencio/fluffy-ui/examples/internal/demo"
 	"github.com/odvcencio/fluffy-ui/runtime"
 	"github.com/odvcencio/fluffy-ui/state"
+	"github.com/odvcencio/fluffy-ui/terminal"
 	"github.com/odvcencio/fluffy-ui/widgets"
 )
 
@@ -80,6 +81,13 @@ var CandyTypes = []CandyType{
 	{Name: "Rare Import", MinPrice: 20, MaxPrice: 150, Emoji: "[R]"},
 }
 
+const (
+	startingCash     = 100
+	startingDebt     = 500
+	startingCapacity = 100
+	maxDays          = 30
+)
+
 type Location struct {
 	Name        string
 	Description string
@@ -104,36 +112,42 @@ type MarketPrices map[string]int
 // =============================================================================
 
 type Game struct {
-	Cash          *state.Signal[int]
-	Debt          *state.Signal[int]
-	Day           *state.Signal[int]
-	MaxDays       int
-	Location      *state.Signal[int]
-	Inventory     *state.Signal[Inventory]
-	Capacity      int
-	Prices        *state.Signal[MarketPrices]
-	PriceHistory  *state.Signal[[]float64]
-	Message       *state.Signal[string]
-	GameOver      *state.Signal[bool]
-	GameOverMsg   *state.Signal[string]
-	ShowEvent     *state.Signal[bool]
-	EventTitle    *state.Signal[string]
-	EventMessage  *state.Signal[string]
-	Heat          *state.Signal[int] // 0-100, teacher suspicion level
+	Cash         *state.Signal[int]
+	Debt         *state.Signal[int]
+	Day          *state.Signal[int]
+	MaxDays      int
+	Location     *state.Signal[int]
+	Inventory    *state.Signal[Inventory]
+	Capacity     int
+	Prices       *state.Signal[MarketPrices]
+	PriceHistory *state.Signal[[]float64]
+	Message      *state.Signal[string]
+	GameOver     *state.Signal[bool]
+	GameOverMsg  *state.Signal[string]
+	ShowEvent    *state.Signal[bool]
+	EventTitle   *state.Signal[string]
+	EventMessage *state.Signal[string]
+	Heat         *state.Signal[int] // 0-100, teacher suspicion level
+
+	// Session stats (long-lived across runs).
+	Runs      int
+	Wins      int
+	Losses    int
+	BestWorth int
 }
 
 func NewGame() *Game {
 	g := &Game{
-		Cash:         state.NewSignal(100),
-		Debt:         state.NewSignal(500),
+		Cash:         state.NewSignal(startingCash),
+		Debt:         state.NewSignal(startingDebt),
 		Day:          state.NewSignal(1),
-		MaxDays:      30,
+		MaxDays:      maxDays,
 		Location:     state.NewSignal(0),
 		Inventory:    state.NewSignal(make(Inventory)),
-		Capacity:     100,
+		Capacity:     startingCapacity,
 		Prices:       state.NewSignal(make(MarketPrices)),
-		PriceHistory: state.NewSignal([]float64{100}),
-		Message:      state.NewSignal("Welcome to Jefferson Middle School! Trade candy to pay off your debt."),
+		PriceHistory: state.NewSignal([]float64{float64(startingCash)}),
+		Message:      state.NewSignal(""),
 		GameOver:     state.NewSignal(false),
 		GameOverMsg:  state.NewSignal(""),
 		ShowEvent:    state.NewSignal(false),
@@ -155,8 +169,26 @@ func NewGame() *Game {
 	g.EventMessage.SetEqualFunc(state.EqualComparable[string])
 	g.Heat.SetEqualFunc(state.EqualComparable[int])
 
-	g.GeneratePrices()
+	g.StartNewRun()
 	return g
+}
+
+func (g *Game) StartNewRun() {
+	g.Runs++
+	g.GameOver.Set(false)
+	g.GameOverMsg.Set("")
+	g.ShowEvent.Set(false)
+	g.EventTitle.Set("")
+	g.EventMessage.Set("")
+	g.Cash.Set(startingCash)
+	g.Debt.Set(startingDebt)
+	g.Day.Set(1)
+	g.Location.Set(0)
+	g.Inventory.Set(make(Inventory))
+	g.Heat.Set(0)
+	g.Message.Set("Welcome to Jefferson Middle School! Trade candy to pay off your debt.")
+	g.GeneratePrices()
+	g.PriceHistory.Set([]float64{float64(startingCash)})
 }
 
 func (g *Game) GeneratePrices() {
@@ -314,8 +346,8 @@ func (g *Game) getCaughtEvent() string {
 
 func (g *Game) TriggerGoodEvent() {
 	events := []struct {
-		title string
-		msg   string
+		title  string
+		msg    string
 		action func()
 	}{
 		{
@@ -390,42 +422,29 @@ func (g *Game) DismissEvent() {
 
 func (g *Game) CheckEndConditions() {
 	day := g.Day.Get()
-	cash := g.Cash.Get()
 	debt := g.Debt.Get()
-
-	// Calculate total worth
-	inv := g.Inventory.Get()
-	prices := g.Prices.Get()
-	totalWorth := cash
-	for name, qty := range inv {
-		if price, ok := prices[name]; ok {
-			totalWorth += qty * price
-		}
-	}
+	totalWorth := g.TotalWorth()
 
 	if totalWorth >= debt && debt > 0 {
 		// Can pay off debt!
-		g.GameOver.Set(true)
-		g.GameOverMsg.Set(fmt.Sprintf(
+		g.endGame(fmt.Sprintf(
 			"Congratulations!\n\nYou paid off your $%d debt in %d days!\n\nFinal worth: $%d\nProfit: $%d\n\nYou're the Candy King of Jefferson Middle!",
 			debt, day, totalWorth, totalWorth-debt,
-		))
+		), true, totalWorth)
 		return
 	}
 
 	if day >= g.MaxDays {
 		if totalWorth >= debt {
-			g.GameOver.Set(true)
-			g.GameOverMsg.Set(fmt.Sprintf(
+			g.endGame(fmt.Sprintf(
 				"Time's Up - But You Won!\n\nYou made $%d and paid your debt!\n\nCongratulations, Candy Trader!",
 				totalWorth,
-			))
+			), true, totalWorth)
 		} else {
-			g.GameOver.Set(true)
-			g.GameOverMsg.Set(fmt.Sprintf(
-				"Game Over!\n\n30 days have passed.\nYou still owe $%d.\n\nThe candy mafia is not pleased...\n\nFinal worth: $%d",
-				debt-totalWorth, totalWorth,
-			))
+			g.endGame(fmt.Sprintf(
+				"Game Over!\n\n%d days have passed.\nYou still owe $%d.\n\nThe candy mafia is not pleased...\n\nFinal worth: $%d",
+				g.MaxDays, debt-totalWorth, totalWorth,
+			), false, totalWorth)
 		}
 	}
 }
@@ -540,12 +559,13 @@ func (g *Game) PayDebt(amount int) bool {
 	}
 
 	g.Cash.Set(cash - amount)
-	g.Debt.Set(debt - amount)
-	g.Message.Set(fmt.Sprintf("Paid $%d towards debt. Remaining: $%d", amount, debt-amount))
+	remainingDebt := debt - amount
+	g.Debt.Set(remainingDebt)
+	g.Message.Set(fmt.Sprintf("Paid $%d towards debt. Remaining: $%d", amount, remainingDebt))
 
-	if debt-amount <= 0 {
-		g.GameOver.Set(true)
-		g.GameOverMsg.Set("You paid off all your debt!\n\nYou win!")
+	if remainingDebt <= 0 {
+		totalWorth := g.TotalWorth()
+		g.endGame("You paid off all your debt!\n\nYou win!", true, totalWorth)
 	}
 
 	return true
@@ -558,6 +578,38 @@ func (g *Game) InventoryCount() int {
 		count += q
 	}
 	return count
+}
+
+func (g *Game) TotalWorth() int {
+	cash := g.Cash.Get()
+	inv := g.Inventory.Get()
+	prices := g.Prices.Get()
+	totalWorth := cash
+	for name, qty := range inv {
+		if price, ok := prices[name]; ok {
+			totalWorth += qty * price
+		}
+	}
+	return totalWorth
+}
+
+func (g *Game) endGame(msg string, win bool, totalWorth int) {
+	if g.GameOver.Get() {
+		return
+	}
+	if win {
+		g.Wins++
+	} else {
+		g.Losses++
+	}
+	if totalWorth > g.BestWorth {
+		g.BestWorth = totalWorth
+	}
+	g.EventTitle.Set("")
+	g.EventMessage.Set("")
+	g.ShowEvent.Set(false)
+	g.GameOverMsg.Set(msg)
+	g.GameOver.Set(true)
 }
 
 // =============================================================================
@@ -574,16 +626,17 @@ type GameView struct {
 	marketTable  *widgets.Table
 	locationList *widgets.List[Location]
 	messageLabel *widgets.Label
+	statsLabel   *widgets.Label
 	inventoryLbl *widgets.Label
 	heatGauge    *widgets.Progress
 	sparkline    *widgets.Sparkline
 
 	// Trade dialog state
-	showTrade     bool
-	tradeCandy    string
-	tradeIsBuy    bool
-	tradeQty      int
-	tradeInput    *widgets.Input
+	showTrade  bool
+	tradeCandy string
+	tradeIsBuy bool
+	tradeQty   int
+	tradeInput *widgets.Input
 
 	// Layout
 	focusIndex   int
@@ -637,6 +690,7 @@ func NewGameView(game *Game) *GameView {
 	})
 
 	v.messageLabel = widgets.NewLabel("")
+	v.statsLabel = widgets.NewLabel("").WithStyle(v.dimStyle)
 	v.inventoryLbl = widgets.NewLabel("")
 
 	v.heatGauge = widgets.NewProgress()
@@ -647,6 +701,9 @@ func NewGameView(game *Game) *GameView {
 
 	v.tradeInput = widgets.NewInput()
 	v.tradeInput.SetPlaceholder("Quantity")
+	v.tradeInput.OnChange(func(string) {
+		v.Invalidate()
+	})
 
 	v.refresh()
 	return v
@@ -673,6 +730,14 @@ func (v *GameView) Unmount() {
 func (v *GameView) refresh() {
 	v.updateMarketTable()
 	v.messageLabel.SetText(v.game.Message.Get())
+	v.statsLabel.SetText(fmt.Sprintf(
+		"Life %d  |  Record %d-%d  |  Best $%d",
+		v.game.Runs, v.game.Wins, v.game.Losses, v.game.BestWorth,
+	))
+	if v.game.GameOver.Get() && v.showTrade {
+		v.showTrade = false
+		v.tradeInput.Blur()
+	}
 
 	inv := v.game.Inventory.Get()
 	invText := fmt.Sprintf("Backpack: %d/%d", v.game.InventoryCount(), v.game.Capacity)
@@ -749,11 +814,13 @@ func (v *GameView) Layout(bounds runtime.Rect) {
 	y += 2
 
 	// Message
-	v.messageLabel.Layout(runtime.Rect{X: bounds.X, Y: y, Width: bounds.Width, Height: 2})
+	v.messageLabel.Layout(runtime.Rect{X: bounds.X, Y: y, Width: bounds.Width, Height: 1})
+	v.statsLabel.Layout(runtime.Rect{X: bounds.X, Y: y + 1, Width: bounds.Width, Height: 1})
 
 	// Trade input (hidden unless trading)
 	if v.showTrade {
-		v.tradeInput.Layout(runtime.Rect{X: bounds.X + 20, Y: bounds.Height/2 + 2, Width: 20, Height: 1})
+		inputRect := v.tradeInputRect(bounds)
+		v.tradeInput.Layout(inputRect)
 	}
 }
 
@@ -821,10 +888,14 @@ func (v *GameView) Render(ctx runtime.RenderContext) {
 
 	// Message
 	v.messageLabel.Render(ctx)
+	v.statsLabel.Render(ctx)
 
 	// Help text
 	helpY := bounds.Y + bounds.Height - 2
 	help := "[B]uy  [S]ell  [P]ay Debt  [1-6]Travel  [Q]uit"
+	if v.game.GameOver.Get() {
+		help = "[R]estart  [Q]uit"
+	}
 	ctx.Buffer.SetString(bounds.X, helpY, help, v.dimStyle)
 
 	// Trade dialog
@@ -843,14 +914,30 @@ func (v *GameView) Render(ctx runtime.RenderContext) {
 	}
 }
 
-func (v *GameView) renderTradeDialog(ctx runtime.RenderContext) {
-	bounds := v.Bounds()
+func (v *GameView) tradeDialogRect(bounds runtime.Rect) runtime.Rect {
 	dialogW := 40
 	dialogH := 8
-	x := (bounds.Width - dialogW) / 2
-	y := (bounds.Height - dialogH) / 2
+	x := bounds.X + (bounds.Width-dialogW)/2
+	y := bounds.Y + (bounds.Height-dialogH)/2
+	return runtime.Rect{X: x, Y: y, Width: dialogW, Height: dialogH}
+}
 
-	rect := runtime.Rect{X: x, Y: y, Width: dialogW, Height: dialogH}
+func (v *GameView) tradeInputRect(bounds runtime.Rect) runtime.Rect {
+	dialog := v.tradeDialogRect(bounds)
+	label := "Qty: "
+	hint := "[Enter] [Esc]"
+	inputX := dialog.X + 2 + len(label)
+	hintX := dialog.X + dialog.Width - 2 - len(hint)
+	inputW := hintX - inputX - 1
+	if inputW < 4 {
+		inputW = 4
+	}
+	return runtime.Rect{X: inputX, Y: dialog.Y + 6, Width: inputW, Height: 1}
+}
+
+func (v *GameView) renderTradeDialog(ctx runtime.RenderContext) {
+	bounds := v.Bounds()
+	rect := v.tradeDialogRect(bounds)
 	ctx.Buffer.Fill(rect, ' ', v.style)
 	ctx.Buffer.DrawBox(rect, v.accentStyle)
 
@@ -859,21 +946,25 @@ func (v *GameView) renderTradeDialog(ctx runtime.RenderContext) {
 		action = "Sell"
 	}
 	title := fmt.Sprintf(" %s %s ", action, v.tradeCandy)
-	ctx.Buffer.SetString(x+2, y, title, v.accentStyle)
+	ctx.Buffer.SetString(rect.X+2, rect.Y, title, v.accentStyle)
 
 	prices := v.game.Prices.Get()
 	price := prices[v.tradeCandy]
 	inv := v.game.Inventory.Get()
 	owned := inv[v.tradeCandy]
 
-	ctx.Buffer.SetString(x+2, y+2, fmt.Sprintf("Price: $%d each", price), v.style)
-	ctx.Buffer.SetString(x+2, y+3, fmt.Sprintf("You own: %d", owned), v.style)
-	ctx.Buffer.SetString(x+2, y+4, fmt.Sprintf("Cash: $%d", v.game.Cash.Get()), v.style)
+	ctx.Buffer.SetString(rect.X+2, rect.Y+2, fmt.Sprintf("Price: $%d each", price), v.style)
+	ctx.Buffer.SetString(rect.X+2, rect.Y+3, fmt.Sprintf("You own: %d", owned), v.style)
+	ctx.Buffer.SetString(rect.X+2, rect.Y+4, fmt.Sprintf("Cash: $%d", v.game.Cash.Get()), v.style)
 
-	ctx.Buffer.SetString(x+2, y+6, "Qty: ", v.style)
+	label := "Qty: "
+	hint := "[Enter] [Esc]"
+	ctx.Buffer.SetString(rect.X+2, rect.Y+6, label, v.style)
+	v.tradeInput.Layout(v.tradeInputRect(bounds))
 	v.tradeInput.Render(ctx)
 
-	ctx.Buffer.SetString(x+dialogW-15, y+6, "[Enter] [Esc]", v.dimStyle)
+	hintX := rect.X + rect.Width - 2 - len(hint)
+	ctx.Buffer.SetString(hintX, rect.Y+6, hint, v.dimStyle)
 }
 
 func (v *GameView) renderEventDialog(ctx runtime.RenderContext) {
@@ -922,7 +1013,7 @@ func (v *GameView) renderGameOverDialog(ctx runtime.RenderContext) {
 		}
 	}
 
-	ctx.Buffer.SetString(x+2, y+dialogH-2, "[Press Q to quit]", v.dimStyle)
+	ctx.Buffer.SetString(x+2, y+dialogH-2, "[R]estart  [Q]uit", v.dimStyle)
 }
 
 func (v *GameView) HandleMessage(msg runtime.Message) runtime.HandleResult {
@@ -931,6 +1022,10 @@ func (v *GameView) HandleMessage(msg runtime.Message) runtime.HandleResult {
 		if key, ok := msg.(runtime.KeyMsg); ok {
 			if key.Rune == 'q' || key.Rune == 'Q' {
 				return runtime.WithCommand(runtime.Quit{})
+			}
+			if key.Rune == 'r' || key.Rune == 'R' {
+				v.restartGame()
+				return runtime.Handled()
 			}
 		}
 		return runtime.Handled()
@@ -998,14 +1093,19 @@ func (v *GameView) HandleMessage(msg runtime.Message) runtime.HandleResult {
 }
 
 func (v *GameView) startTrade(isBuy bool) {
-	// Get selected candy from table
-	// For simplicity, use the first candy or let user select
+	// Use the currently selected candy from the market table.
+	selected := v.marketTable.SelectedIndex()
+	if selected < 0 || selected >= len(CandyTypes) {
+		selected = 0
+	}
+
 	v.showTrade = true
 	v.tradeIsBuy = isBuy
-	v.tradeCandy = CandyTypes[0].Name // Default to first
+	v.tradeCandy = CandyTypes[selected].Name
 	v.tradeQty = 1
 	v.tradeInput.Clear()
 	v.tradeInput.SetPlaceholder("1")
+	v.tradeInput.Focus()
 	v.Invalidate()
 }
 
@@ -1016,14 +1116,13 @@ func (v *GameView) handleTradeInput(msg runtime.Message) runtime.HandleResult {
 	}
 
 	switch key.Key {
-	case 27: // Escape
+	case terminal.KeyEscape:
 		v.showTrade = false
+		v.tradeInput.Blur()
 		v.Invalidate()
 		return runtime.Handled()
-	}
 
-	switch key.Rune {
-	case 13, 10: // Enter
+	case terminal.KeyEnter:
 		// Parse quantity
 		qtyStr := v.tradeInput.Text()
 		if qtyStr == "" {
@@ -1041,22 +1140,21 @@ func (v *GameView) handleTradeInput(msg runtime.Message) runtime.HandleResult {
 		}
 
 		v.showTrade = false
+		v.tradeInput.Blur()
 		v.refresh()
 		return runtime.Handled()
-
-	case '1', '2', '3', '4', '5', '6':
-		// Quick select candy type
-		idx := int(key.Rune - '1')
-		if idx >= 0 && idx < len(CandyTypes) {
-			v.tradeCandy = CandyTypes[idx].Name
-			v.Invalidate()
-		}
-		return runtime.Handled()
-
-	default:
-		// Pass to input
-		return v.tradeInput.HandleMessage(msg)
 	}
+
+	// Pass to input
+	return v.tradeInput.HandleMessage(msg)
+}
+
+func (v *GameView) restartGame() {
+	v.showTrade = false
+	v.tradeInput.Blur()
+	v.tradeInput.Clear()
+	v.game.StartNewRun()
+	v.refresh()
 }
 
 func (v *GameView) ChildWidgets() []runtime.Widget {
@@ -1065,6 +1163,7 @@ func (v *GameView) ChildWidgets() []runtime.Widget {
 		v.marketTable,
 		v.locationList,
 		v.messageLabel,
+		v.statsLabel,
 		v.inventoryLbl,
 		v.heatGauge,
 		v.sparkline,

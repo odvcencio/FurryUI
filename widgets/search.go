@@ -1,6 +1,8 @@
 package widgets
 
 import (
+	"strconv"
+
 	"github.com/odvcencio/fluffy-ui/backend"
 	"github.com/odvcencio/fluffy-ui/runtime"
 	"github.com/odvcencio/fluffy-ui/terminal"
@@ -121,7 +123,7 @@ func (s *SearchWidget) Render(ctx runtime.RenderContext) {
 
 	// Draw match count on the right
 	if s.matchCount > 0 {
-		matchInfo := intToStr(s.currentMatch+1) + "/" + intToStr(s.matchCount)
+		matchInfo := strconv.Itoa(s.currentMatch+1) + "/" + strconv.Itoa(s.matchCount)
 		infoX := b.X + b.Width - len(matchInfo) - 2
 		buf.SetString(infoX, b.Y, matchInfo, s.matchStyle)
 	} else if s.query != "" {

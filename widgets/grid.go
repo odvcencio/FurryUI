@@ -74,8 +74,8 @@ func (g *Grid) Measure(constraints runtime.Constraints) runtime.Size {
 			maxH = size.Height
 		}
 	}
-	width := maxW*cols + g.Gap*maxInt(0, cols-1)
-	height := maxH*rows + g.Gap*maxInt(0, rows-1)
+	width := maxW*cols + g.Gap*max(0, cols-1)
+	height := maxH*rows + g.Gap*max(0, rows-1)
 	return constraints.Constrain(runtime.Size{Width: width, Height: height})
 }
 
@@ -90,15 +90,15 @@ func (g *Grid) Layout(bounds runtime.Rect) {
 	if cols <= 0 {
 		cols = 1
 	}
-	totalGapW := g.Gap * maxInt(0, cols-1)
-	totalGapH := g.Gap * maxInt(0, rows-1)
+	totalGapW := g.Gap * max(0, cols-1)
+	totalGapH := g.Gap * max(0, rows-1)
 	cellW := 0
 	cellH := 0
 	if cols > 0 {
-		cellW = maxInt(0, (bounds.Width-totalGapW)/cols)
+		cellW = max(0, (bounds.Width-totalGapW)/cols)
 	}
 	if rows > 0 {
-		cellH = maxInt(0, (bounds.Height-totalGapH)/rows)
+		cellH = max(0, (bounds.Height-totalGapH)/rows)
 	}
 	for _, child := range g.Children {
 		if child.Widget == nil {
@@ -114,8 +114,8 @@ func (g *Grid) Layout(bounds runtime.Rect) {
 		}
 		x := bounds.X + child.Col*cellW + g.Gap*child.Col
 		y := bounds.Y + child.Row*cellH + g.Gap*child.Row
-		width := cellW*colSpan + g.Gap*maxInt(0, colSpan-1)
-		height := cellH*rowSpan + g.Gap*maxInt(0, rowSpan-1)
+		width := cellW*colSpan + g.Gap*max(0, colSpan-1)
+		height := cellH*rowSpan + g.Gap*max(0, rowSpan-1)
 		child.Widget.Layout(runtime.Rect{X: x, Y: y, Width: width, Height: height})
 	}
 }

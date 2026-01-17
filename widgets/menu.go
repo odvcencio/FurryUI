@@ -60,7 +60,7 @@ func (m *Menu) SetItems(items ...*MenuItem) {
 // Measure returns desired size.
 func (m *Menu) Measure(constraints runtime.Constraints) runtime.Size {
 	count := len(m.flatten())
-	height := minInt(count, constraints.MaxHeight)
+	height := min(count, constraints.MaxHeight)
 	if height <= 0 {
 		height = constraints.MinHeight
 	}

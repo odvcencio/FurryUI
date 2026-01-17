@@ -23,7 +23,7 @@ func NewRadioGroup() *RadioGroup {
 // Selected returns the selected index.
 func (g *RadioGroup) Selected() int {
 	if g == nil || g.selected == nil {
-		return -1
+		return 0
 	}
 	return g.selected.Get()
 }

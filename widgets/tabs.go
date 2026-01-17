@@ -59,7 +59,7 @@ func (t *Tabs) Layout(bounds runtime.Rect) {
 		X:      bounds.X,
 		Y:      bounds.Y + 1,
 		Width:  bounds.Width,
-		Height: maxInt(0, bounds.Height-1),
+		Height: max(0, bounds.Height-1),
 	}
 	selected.Content.Layout(contentBounds)
 }

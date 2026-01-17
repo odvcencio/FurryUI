@@ -50,7 +50,7 @@ func (s *Select) SetOnChange(fn func(option SelectOption)) {
 // Selected returns the current selection index.
 func (s *Select) Selected() int {
 	if s == nil {
-		return -1
+		return 0
 	}
 	return s.selected
 }

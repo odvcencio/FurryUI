@@ -2,6 +2,8 @@
 package widgets
 
 import (
+	"github.com/mattn/go-runewidth"
+
 	"github.com/odvcencio/fluffy-ui/backend"
 	"github.com/odvcencio/fluffy-ui/runtime"
 )
@@ -16,6 +18,9 @@ type Base struct {
 
 // Layout stores the assigned bounds.
 func (b *Base) Layout(bounds runtime.Rect) {
+	if b == nil {
+		return
+	}
 	if b.bounds != bounds {
 		b.bounds = bounds
 		b.needsRender = true
@@ -24,6 +29,9 @@ func (b *Base) Layout(bounds runtime.Rect) {
 
 // Bounds returns the widget's assigned bounds.
 func (b *Base) Bounds() runtime.Rect {
+	if b == nil {
+		return runtime.Rect{}
+	}
 	return b.bounds
 }
 
@@ -39,31 +47,49 @@ func (b *Base) CanFocus() bool {
 
 // Focus marks the widget as focused.
 func (b *Base) Focus() {
+	if b == nil {
+		return
+	}
 	b.focused = true
 }
 
 // Blur marks the widget as unfocused.
 func (b *Base) Blur() {
+	if b == nil {
+		return
+	}
 	b.focused = false
 }
 
 // IsFocused returns whether the widget is focused.
 func (b *Base) IsFocused() bool {
+	if b == nil {
+		return false
+	}
 	return b.focused
 }
 
 // Invalidate marks the widget as needing a render pass.
 func (b *Base) Invalidate() {
+	if b == nil {
+		return
+	}
 	b.needsRender = true
 }
 
 // NeedsRender reports whether the widget needs to re-render.
 func (b *Base) NeedsRender() bool {
+	if b == nil {
+		return false
+	}
 	return b.needsRender
 }
 
 // ClearInvalidation clears the render-needed flag.
 func (b *Base) ClearInvalidation() {
+	if b == nil {
+		return
+	}
 	b.needsRender = false
 }
 
@@ -115,13 +141,13 @@ func fillRect(buf *runtime.Buffer, bounds runtime.Rect, ch rune, style backend.S
 // truncateString truncates a string to fit within maxWidth.
 // Adds "..." if truncated.
 func truncateString(s string, maxWidth int) string {
-	if len(s) <= maxWidth {
+	if maxWidth <= 0 {
+		return ""
+	}
+	if runewidth.StringWidth(s) <= maxWidth {
 		return s
 	}
-	if maxWidth <= 3 {
-		return s[:maxWidth]
-	}
-	return s[:maxWidth-3] + "..."
+	return runewidth.Truncate(s, maxWidth, "...")
 }
 
 // padRight pads a string with spaces to reach the given width.

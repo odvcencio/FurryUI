@@ -392,6 +392,7 @@ type MultilineInput struct {
 	scrollY    int // First visible line
 	style      backend.Style
 	focusStyle backend.Style
+	services   runtime.Services
 
 	onSubmit func(text string)
 	onChange func(text string)
@@ -404,6 +405,16 @@ func NewMultilineInput() *MultilineInput {
 		style:      backend.DefaultStyle(),
 		focusStyle: backend.DefaultStyle(),
 	}
+}
+
+// Bind attaches app services.
+func (m *MultilineInput) Bind(services runtime.Services) {
+	m.services = services
+}
+
+// Unbind releases app services.
+func (m *MultilineInput) Unbind() {
+	m.services = runtime.Services{}
 }
 
 // Text returns the full text content.
@@ -432,6 +443,11 @@ func (m *MultilineInput) Clear() {
 // OnSubmit sets the callback (Ctrl+Enter to submit).
 func (m *MultilineInput) OnSubmit(fn func(text string)) {
 	m.onSubmit = fn
+}
+
+// OnChange sets the callback for when text changes.
+func (m *MultilineInput) OnChange(fn func(text string)) {
+	m.onChange = fn
 }
 
 // Measure returns the preferred size.
@@ -504,6 +520,19 @@ func (m *MultilineInput) HandleMessage(msg runtime.Message) runtime.HandleResult
 	}
 
 	switch key.Key {
+	case terminal.KeyCtrlC:
+		if m.copyToClipboard() {
+			return runtime.Handled()
+		}
+	case terminal.KeyCtrlX:
+		if m.cutToClipboard() {
+			return runtime.Handled()
+		}
+	case terminal.KeyCtrlV:
+		if m.pasteFromClipboard() {
+			return runtime.Handled()
+		}
+
 	case terminal.KeyEnter:
 		if key.Ctrl && m.onSubmit != nil {
 			m.onSubmit(m.Text())
@@ -517,6 +546,7 @@ func (m *MultilineInput) HandleMessage(msg runtime.Message) runtime.HandleResult
 		m.cursorY++
 		m.cursorX = 0
 		m.ensureCursorVisible()
+		m.notifyChange()
 		return runtime.Handled()
 
 	case terminal.KeyBackspace:
@@ -532,6 +562,7 @@ func (m *MultilineInput) HandleMessage(msg runtime.Message) runtime.HandleResult
 			m.lines = append(m.lines[:m.cursorY], m.lines[m.cursorY+1:]...)
 			m.cursorY--
 		}
+		m.notifyChange()
 		return runtime.Handled()
 
 	case terminal.KeyUp:
@@ -576,6 +607,7 @@ func (m *MultilineInput) HandleMessage(msg runtime.Message) runtime.HandleResult
 		line := m.lines[m.cursorY]
 		m.lines[m.cursorY] = line[:m.cursorX] + string(key.Rune) + line[m.cursorX:]
 		m.cursorX++
+		m.notifyChange()
 		return runtime.Handled()
 
 	case terminal.KeyEscape:
@@ -592,3 +624,117 @@ func (m *MultilineInput) ensureCursorVisible() {
 		m.scrollY = m.cursorY - m.bounds.Height + 1
 	}
 }
+
+func (m *MultilineInput) notifyChange() {
+	if m.onChange != nil {
+		m.onChange(m.Text())
+	}
+}
+
+// ClipboardCopy returns the current text.
+func (m *MultilineInput) ClipboardCopy() (string, bool) {
+	if m == nil {
+		return "", false
+	}
+	return m.Text(), true
+}
+
+// ClipboardCut returns the current text and clears the input.
+func (m *MultilineInput) ClipboardCut() (string, bool) {
+	if m == nil {
+		return "", false
+	}
+	text := m.Text()
+	m.Clear()
+	m.notifyChange()
+	return text, true
+}
+
+// ClipboardPaste inserts text at the cursor.
+func (m *MultilineInput) ClipboardPaste(text string) bool {
+	if m == nil || text == "" {
+		return false
+	}
+	m.insertText(text)
+	return true
+}
+
+func (m *MultilineInput) copyToClipboard() bool {
+	cb := m.services.Clipboard()
+	if cb == nil || !cb.Available() {
+		return false
+	}
+	text, ok := m.ClipboardCopy()
+	if !ok {
+		return false
+	}
+	_ = cb.Write(text)
+	return true
+}
+
+func (m *MultilineInput) cutToClipboard() bool {
+	cb := m.services.Clipboard()
+	if cb == nil || !cb.Available() {
+		return false
+	}
+	text, ok := m.ClipboardCut()
+	if !ok {
+		return false
+	}
+	_ = cb.Write(text)
+	return true
+}
+
+func (m *MultilineInput) pasteFromClipboard() bool {
+	cb := m.services.Clipboard()
+	if cb == nil || !cb.Available() {
+		return false
+	}
+	text, err := cb.Read()
+	if err != nil || text == "" {
+		return false
+	}
+	return m.ClipboardPaste(text)
+}
+
+func (m *MultilineInput) insertText(text string) {
+	if text == "" {
+		return
+	}
+	if len(m.lines) == 0 {
+		m.lines = []string{""}
+		m.cursorX = 0
+		m.cursorY = 0
+	}
+	parts := strings.Split(text, "\n")
+	line := m.lines[m.cursorY]
+	prefix := line[:m.cursorX]
+	suffix := line[m.cursorX:]
+
+	if len(parts) == 1 {
+		m.lines[m.cursorY] = prefix + parts[0] + suffix
+		m.cursorX += len(parts[0])
+		m.notifyChange()
+		return
+	}
+
+	first := prefix + parts[0]
+	last := parts[len(parts)-1] + suffix
+	middle := parts[1 : len(parts)-1]
+
+	newLines := make([]string, 0, len(m.lines)+len(parts)-1)
+	newLines = append(newLines, m.lines[:m.cursorY]...)
+	newLines = append(newLines, first)
+	newLines = append(newLines, middle...)
+	newLines = append(newLines, last)
+	if m.cursorY+1 < len(m.lines) {
+		newLines = append(newLines, m.lines[m.cursorY+1:]...)
+	}
+	m.lines = newLines
+	m.cursorY += len(parts) - 1
+	m.cursorX = len(parts[len(parts)-1])
+	m.ensureCursorVisible()
+	m.notifyChange()
+}
+
+var _ clipboard.Target = (*MultilineInput)(nil)

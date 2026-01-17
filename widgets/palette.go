@@ -2,6 +2,7 @@ package widgets
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/odvcencio/fluffy-ui/backend"
@@ -382,7 +383,7 @@ func (p *PaletteWidget) Render(ctx runtime.RenderContext) {
 
 	// Draw item count if more items than visible
 	if len(p.filtered) > maxItems {
-		countStr := intToStr(len(p.filtered)) + " results"
+		countStr := strconv.Itoa(len(p.filtered)) + " results"
 		ctx.Buffer.SetString(b.X+b.Width-2-len(countStr), b.Y+b.Height-1, countStr, p.borderStyle)
 	}
 }

@@ -108,7 +108,7 @@ func (t *ToastStack) Render(ctx runtime.RenderContext) {
 	if availableWidth <= 0 {
 		return
 	}
-	maxWidth := minInt(toastMaxWidth, availableWidth)
+	maxWidth := min(toastMaxWidth, availableWidth)
 	if maxWidth < toastMinWidth {
 		maxWidth = availableWidth
 	}
