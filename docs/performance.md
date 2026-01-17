@@ -12,6 +12,8 @@ call `Invalidate` once so the runtime can refresh on the next tick.
 
 Wrap long content in `ScrollView` and implement `scroll.VirtualContent` when
 possible to avoid rendering off-screen rows.
+For faster indexing, implement `scroll.VirtualSizer` and `scroll.VirtualIndexer`
+to avoid O(n) scans on every scroll update.
 
 ## Avoid full-screen redraws
 

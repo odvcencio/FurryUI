@@ -460,29 +460,58 @@ func (a *App) render() {
 			stats.FullRedraw = fullRedraw
 		}
 
+		rowWriter, hasRowWriter := a.backend.(backend.RowWriter)
+		rectWriter, hasRectWriter := a.backend.(backend.RectWriter)
+		cells := buf.Cells()
+		flushedCells := 0
 		flushStart := time.Time{}
 		if observer != nil {
 			flushStart = time.Now()
 		}
 		if fullRedraw {
-			for y := 0; y < h; y++ {
-				for x := 0; x < w; x++ {
-					cell := buf.Get(x, y)
-					a.backend.SetContent(x, y, cell.Rune, nil, cell.Style)
+			switch {
+			case hasRectWriter:
+				rectWriter.SetRect(0, 0, w, h, cells)
+			case hasRowWriter:
+				for y := 0; y < h; y++ {
+					rowStart := y * w
+					rowWriter.SetRow(y, 0, cells[rowStart:rowStart+w])
+				}
+			default:
+				for y := 0; y < h; y++ {
+					rowStart := y * w
+					row := cells[rowStart : rowStart+w]
+					for x, cell := range row {
+						a.backend.SetContent(x, y, cell.Rune, nil, cell.Style)
+					}
 				}
 			}
+			flushedCells = totalCells
 		} else {
-			buf.ForEachDirtyCell(func(x, y int, cell Cell) {
-				a.backend.SetContent(x, y, cell.Rune, nil, cell.Style)
-			})
+			rect := buf.DirtyRect()
+			rectArea := rect.Width * rect.Height
+			useRect := hasRectWriter && rect.Width == w && rectArea > 0 && dirtyCount*2 >= rectArea
+			if useRect {
+				start := rect.Y * w
+				end := start + rectArea
+				rectWriter.SetRect(0, rect.Y, w, rect.Height, cells[start:end])
+				flushedCells = rectArea
+			} else if hasRowWriter && rectArea > 0 && dirtyCount*4 >= rectArea {
+				buf.ForEachDirtySpan(func(y, startX, endX int) {
+					rowStart := y * w
+					rowWriter.SetRow(y, startX, cells[rowStart+startX:rowStart+endX])
+					flushedCells += endX - startX
+				})
+			} else {
+				buf.ForEachDirtyCell(func(x, y int, cell Cell) {
+					a.backend.SetContent(x, y, cell.Rune, nil, cell.Style)
+				})
+				flushedCells = dirtyCount
+			}
 		}
 		if observer != nil {
 			stats.FlushDuration = time.Since(flushStart)
-			if fullRedraw {
-				stats.FlushedCells = totalCells
-			} else {
-				stats.FlushedCells = dirtyCount
-			}
+			stats.FlushedCells = flushedCells
 		}
 		if a.recorder != nil {
 			if err := a.recorder.Frame(buf, time.Now()); err != nil {

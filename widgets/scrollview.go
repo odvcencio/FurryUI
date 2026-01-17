@@ -515,6 +515,17 @@ func (s *ScrollView) virtualContentSize(constraints runtime.Constraints) runtime
 	if s == nil || s.virtual == nil {
 		return runtime.Size{}
 	}
+	if sizer, ok := s.virtual.(scroll.VirtualSizer); ok {
+		total := sizer.TotalHeight()
+		if total < 0 {
+			total = 0
+		}
+		width := constraints.MaxWidth
+		if width <= 0 {
+			width = constraints.MinWidth
+		}
+		return runtime.Size{Width: width, Height: total}
+	}
 	count := s.virtual.ItemCount()
 	totalHeight := 0
 	for i := 0; i < count; i++ {
@@ -533,6 +544,9 @@ func (s *ScrollView) virtualContentSize(constraints runtime.Constraints) runtime
 func (s *ScrollView) virtualIndexForOffset(offset int) int {
 	if s == nil || s.virtual == nil {
 		return 0
+	}
+	if indexer, ok := s.virtual.(scroll.VirtualIndexer); ok {
+		return indexer.IndexForOffset(offset)
 	}
 	if offset <= 0 {
 		return 0
@@ -558,6 +572,9 @@ func (s *ScrollView) virtualIndexForOffset(offset int) int {
 func (s *ScrollView) virtualOffsetForIndex(index int) int {
 	if s == nil || s.virtual == nil || index <= 0 {
 		return 0
+	}
+	if indexer, ok := s.virtual.(scroll.VirtualIndexer); ok {
+		return indexer.OffsetForIndex(index)
 	}
 	total := 0
 	count := s.virtual.ItemCount()

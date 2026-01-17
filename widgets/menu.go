@@ -26,6 +26,11 @@ type Menu struct {
 	offset        int
 	style         backend.Style
 	selectedStyle backend.Style
+	indentCache   []string
+	flatCache     []menuRow
+	flatDirty     bool
+	itemsLen      int
+	itemsFirst    *MenuItem
 }
 
 // NewMenu creates a new menu.
@@ -35,7 +40,21 @@ func NewMenu(items ...*MenuItem) *Menu {
 		selectedIndex: 0,
 		style:         backend.DefaultStyle(),
 		selectedStyle: backend.DefaultStyle().Reverse(true),
+		flatDirty:     true,
+		itemsLen:      len(items),
+		itemsFirst:    firstItem(items),
 	}
+}
+
+// SetItems replaces the menu items and clears cached rows.
+func (m *Menu) SetItems(items ...*MenuItem) {
+	if m == nil {
+		return
+	}
+	m.Items = items
+	m.itemsLen = len(items)
+	m.itemsFirst = firstItem(items)
+	m.flatDirty = true
 }
 
 // Measure returns desired size.
@@ -92,10 +111,7 @@ func (m *Menu) Render(ctx runtime.RenderContext) {
 				prefix = "+ "
 			}
 		}
-		indent := ""
-		for d := 0; d < row.depth; d++ {
-			indent += "  "
-		}
+		indent := m.indent(row.depth)
 		line := indent + prefix + row.item.Title
 		if row.item.Shortcut != "" {
 			line += " (" + row.item.Shortcut + ")"
@@ -125,17 +141,20 @@ func (m *Menu) HandleMessage(msg runtime.Message) runtime.HandleResult {
 	case terminal.KeyLeft:
 		if row := m.selectedRow(rows); row != nil && row.item.Expanded {
 			row.item.Expanded = false
+			m.flatDirty = true
 		}
 		return runtime.Handled()
 	case terminal.KeyRight:
 		if row := m.selectedRow(rows); row != nil && len(row.item.Children) > 0 {
 			row.item.Expanded = true
+			m.flatDirty = true
 		}
 		return runtime.Handled()
 	case terminal.KeyEnter:
 		if row := m.selectedRow(rows); row != nil && !row.item.Disabled {
 			if len(row.item.Children) > 0 {
 				row.item.Expanded = !row.item.Expanded
+				m.flatDirty = true
 			}
 			if row.item.OnSelect != nil {
 				row.item.OnSelect()
@@ -152,7 +171,16 @@ type menuRow struct {
 }
 
 func (m *Menu) flatten() []menuRow {
-	var rows []menuRow
+	currentFirst := firstItem(m.Items)
+	if m.itemsLen != len(m.Items) || m.itemsFirst != currentFirst {
+		m.itemsLen = len(m.Items)
+		m.itemsFirst = currentFirst
+		m.flatDirty = true
+	}
+	if !m.flatDirty {
+		return m.flatCache
+	}
+	rows := m.flatCache[:0]
 	var walk func(items []*MenuItem, depth int)
 	walk = func(items []*MenuItem, depth int) {
 		for _, item := range items {
@@ -166,7 +194,9 @@ func (m *Menu) flatten() []menuRow {
 		}
 	}
 	walk(m.Items, 0)
-	return rows
+	m.flatCache = rows
+	m.flatDirty = false
+	return m.flatCache
 }
 
 func (m *Menu) setSelected(index int, count int) {
@@ -198,6 +228,26 @@ func (m *Menu) ScrollBy(dx, dy int) {
 	rows := m.flatten()
 	m.setSelected(m.selectedIndex+dy, len(rows))
 	m.Invalidate()
+}
+
+func (m *Menu) indent(depth int) string {
+	if depth <= 0 {
+		return ""
+	}
+	if len(m.indentCache) == 0 {
+		m.indentCache = []string{""}
+	}
+	for len(m.indentCache) <= depth {
+		m.indentCache = append(m.indentCache, m.indentCache[len(m.indentCache)-1]+"  ")
+	}
+	return m.indentCache[depth]
+}
+
+func firstItem(items []*MenuItem) *MenuItem {
+	if len(items) == 0 {
+		return nil
+	}
+	return items[0]
 }
 
 // ScrollTo scrolls to an absolute row index.

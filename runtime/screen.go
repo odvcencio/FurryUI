@@ -299,6 +299,9 @@ func (s *Screen) drawFocusIndicator() {
 // they bubble down to lower layers.
 func (s *Screen) HandleMessage(msg Message) HandleResult {
 	if mouse, ok := msg.(MouseMsg); ok && s.hitGrid != nil {
+		if s.hitGridDirty {
+			s.buildHitGrid()
+		}
 		if target := s.hitGrid.WidgetAt(mouse.X, mouse.Y); target != nil {
 			result := target.HandleMessage(msg)
 			for _, cmd := range result.Commands {

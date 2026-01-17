@@ -62,6 +62,7 @@ API notes:
 - `NewScrollView(content)` creates the container.
 - `SetBehavior` configures scroll policies and page size.
 - `ScrollBy`, `ScrollToStart`, and `ScrollToEnd` support programmatic control.
+- Implement `scroll.VirtualSizer` / `scroll.VirtualIndexer` for fast virtual lists.
 - GoDoc example: `ExampleScrollView`.
 
 Example:

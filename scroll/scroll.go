@@ -215,6 +215,17 @@ type VirtualContent interface {
 	ItemAt(index int) any
 }
 
+// VirtualSizer optionally provides total height for virtual content.
+type VirtualSizer interface {
+	TotalHeight() int
+}
+
+// VirtualIndexer optionally provides fast offset/index mapping.
+type VirtualIndexer interface {
+	IndexForOffset(offset int) int
+	OffsetForIndex(index int) int
+}
+
 // Scrollbar configures scrollbar rendering.
 type Scrollbar struct {
 	Orientation  Orientation

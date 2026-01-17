@@ -16,6 +16,9 @@ type Backend struct {
 	// Bracketed paste state
 	inPaste     bool
 	pasteBuffer strings.Builder
+
+	styleCache    map[backend.Style]tcell.Style
+	styleCacheCap int
 }
 
 // New creates a new tcell backend.
@@ -54,7 +57,34 @@ func (b *Backend) Size() (width, height int) {
 
 // SetContent sets a cell at position (x, y).
 func (b *Backend) SetContent(x, y int, mainc rune, comb []rune, style backend.Style) {
-	b.screen.SetContent(x, y, mainc, comb, convertStyle(style))
+	b.screen.SetContent(x, y, mainc, comb, b.cachedStyle(style))
+}
+
+// SetRow updates a row using the runtime row-writer fast path.
+func (b *Backend) SetRow(y int, startX int, cells []backend.Cell) {
+	if startX < 0 || len(cells) == 0 {
+		return
+	}
+	x := startX
+	for _, cell := range cells {
+		b.screen.SetContent(x, y, cell.Rune, nil, b.cachedStyle(cell.Style))
+		x++
+	}
+}
+
+// SetRect updates a rectangle using row-major cells.
+func (b *Backend) SetRect(x, y, width, height int, cells []backend.Cell) {
+	if width <= 0 || height <= 0 {
+		return
+	}
+	expected := width * height
+	if len(cells) < expected {
+		return
+	}
+	for row := 0; row < height; row++ {
+		rowStart := row * width
+		b.SetRow(y+row, x, cells[rowStart:rowStart+width])
+	}
 }
 
 // Show synchronizes the buffer to the terminal.
@@ -146,6 +176,27 @@ func (b *Backend) Beep() {
 // Sync forces a full redraw.
 func (b *Backend) Sync() {
 	b.screen.Sync()
+}
+
+const defaultStyleCacheCap = 256
+
+func (b *Backend) cachedStyle(s backend.Style) tcell.Style {
+	if b.styleCache == nil {
+		b.styleCacheCap = defaultStyleCacheCap
+		b.styleCache = make(map[backend.Style]tcell.Style, b.styleCacheCap)
+	}
+	if cached, ok := b.styleCache[s]; ok {
+		return cached
+	}
+	if b.styleCacheCap <= 0 {
+		b.styleCacheCap = defaultStyleCacheCap
+	}
+	if len(b.styleCache) >= b.styleCacheCap {
+		b.styleCache = make(map[backend.Style]tcell.Style, b.styleCacheCap)
+	}
+	style := convertStyle(s)
+	b.styleCache[s] = style
+	return style
 }
 
 // convertStyle converts backend.Style to tcell.Style.

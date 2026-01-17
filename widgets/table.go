@@ -23,6 +23,9 @@ type Table struct {
 	style         backend.Style
 	headerStyle   backend.Style
 	selectedStyle backend.Style
+	cachedWidths  []int
+	cachedTotal   int
+	cachedSig     uint32
 }
 
 // NewTable creates a table with columns.
@@ -173,6 +176,9 @@ func (t *Table) columnWidths(total int) []int {
 	if len(t.Columns) == 0 {
 		return nil
 	}
+	if total == t.cachedTotal && len(t.cachedWidths) == len(t.Columns) && t.cachedSig == t.columnsSignature() {
+		return t.cachedWidths
+	}
 	available := total - (len(t.Columns) - 1)
 	if available < 0 {
 		available = 0
@@ -205,7 +211,21 @@ func (t *Table) columnWidths(total int) []int {
 			widths[i] = flexWidth
 		}
 	}
+	t.cachedTotal = total
+	t.cachedSig = t.columnsSignature()
+	t.cachedWidths = widths
 	return widths
+}
+
+func (t *Table) columnsSignature() uint32 {
+	if t == nil {
+		return 0
+	}
+	var sig uint32 = uint32(len(t.Columns))
+	for _, col := range t.Columns {
+		sig = sig*31 + uint32(col.Width+1)
+	}
+	return sig
 }
 
 // ScrollBy scrolls selection by delta.

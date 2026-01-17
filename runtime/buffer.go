@@ -12,10 +12,7 @@ package runtime
 import "github.com/odvcencio/fluffy-ui/backend"
 
 // Cell represents a single character cell in the buffer.
-type Cell struct {
-	Rune  rune
-	Style backend.Style
-}
+type Cell = backend.Cell
 
 // Buffer is a 2D grid of cells for rendering widgets.
 // Widgets render to the buffer, then the buffer is flushed to the backend.
@@ -26,11 +23,13 @@ type Buffer struct {
 	height int
 
 	// Dirty tracking - tracks which cells have changed
-	dirty            []bool // Parallel to cells, true if cell changed
-	dirtyCount       int    // Number of dirty cells (fast check)
-	dirtyRect        Rect   // Bounding box of dirty region
-	dirtyIndices     []int  // Sparse dirty list for fast iteration
-	dirtyListCap     int    // Max indices to collect before disabling list
+	dirtyStamp       []uint32 // Generation marker per cell
+	dirtyGen         uint32
+	dirtyAll         bool
+	dirtyCount       int   // Number of dirty cells (fast check)
+	dirtyRect        Rect  // Bounding box of dirty region
+	dirtyIndices     []int // Sparse dirty list for fast iteration
+	dirtyListCap     int   // Max indices to collect before disabling list
 	dirtyListEnabled bool
 }
 
@@ -40,7 +39,8 @@ func NewBuffer(w, h int) *Buffer {
 	dirtyListCap := calcDirtyListCap(total)
 	return &Buffer{
 		cells:            make([]Cell, total),
-		dirty:            make([]bool, total),
+		dirtyStamp:       make([]uint32, total),
+		dirtyGen:         1,
 		width:            w,
 		height:           h,
 		dirtyIndices:     make([]int, 0, min(total, dirtyListCap)),
@@ -60,7 +60,6 @@ func (b *Buffer) Resize(w, h int) {
 		return
 	}
 	newCells := make([]Cell, w*h)
-	newDirty := make([]bool, w*h)
 	// Copy existing content
 	minW := min(w, b.width)
 	minH := min(h, b.height)
@@ -68,7 +67,11 @@ func (b *Buffer) Resize(w, h int) {
 		copy(newCells[y*w:y*w+minW], b.cells[y*b.width:y*b.width+minW])
 	}
 	b.cells = newCells
-	b.dirty = newDirty
+	b.dirtyStamp = make([]uint32, w*h)
+	b.dirtyGen = 1
+	b.dirtyAll = false
+	b.dirtyCount = 0
+	b.dirtyRect = Rect{}
 	b.width = w
 	b.height = h
 	b.dirtyListCap = calcDirtyListCap(w * h)
@@ -318,8 +321,11 @@ func (s *SubBuffer) Clear() {
 
 // markCellDirty marks a single cell as dirty and updates the bounding box.
 func (b *Buffer) markCellDirty(x, y, idx int) {
-	if !b.dirty[idx] {
-		b.dirty[idx] = true
+	if b.dirtyAll {
+		return
+	}
+	if b.dirtyStamp[idx] != b.dirtyGen {
+		b.dirtyStamp[idx] = b.dirtyGen
 		b.dirtyCount++
 
 		// Expand dirty rect
@@ -354,11 +360,8 @@ func (b *Buffer) markCellDirty(x, y, idx int) {
 
 // MarkAllDirty marks the entire buffer as dirty.
 func (b *Buffer) MarkAllDirty() {
-	// Set all to true - using a simple fill since clear only works for zero values
-	for i := range b.dirty {
-		b.dirty[i] = true
-	}
-	b.dirtyCount = len(b.dirty)
+	b.dirtyAll = true
+	b.dirtyCount = b.width * b.height
 	b.dirtyRect = Rect{X: 0, Y: 0, Width: b.width, Height: b.height}
 	b.dirtyListEnabled = false
 	b.dirtyIndices = b.dirtyIndices[:0]
@@ -366,27 +369,33 @@ func (b *Buffer) MarkAllDirty() {
 
 // ClearDirty resets all dirty flags.
 func (b *Buffer) ClearDirty() {
-	// Fast clear using copy (relies on Go's optimized memclr)
-	clear(b.dirty)
+	b.dirtyAll = false
 	b.dirtyCount = 0
 	b.dirtyRect = Rect{}
 	b.dirtyListEnabled = true
 	b.dirtyIndices = b.dirtyIndices[:0]
+	b.advanceDirtyGen()
 }
 
 // IsDirty returns true if any cells have changed.
 func (b *Buffer) IsDirty() bool {
-	return b.dirtyCount > 0
+	return b.dirtyAll || b.dirtyCount > 0
 }
 
 // DirtyCount returns the number of dirty cells.
 func (b *Buffer) DirtyCount() int {
+	if b.dirtyAll {
+		return b.width * b.height
+	}
 	return b.dirtyCount
 }
 
 // DirtyRect returns the bounding box of dirty cells.
 // Returns empty rect if nothing is dirty.
 func (b *Buffer) DirtyRect() Rect {
+	if b.dirtyAll {
+		return Rect{X: 0, Y: 0, Width: b.width, Height: b.height}
+	}
 	return b.dirtyRect
 }
 
@@ -395,12 +404,25 @@ func (b *Buffer) IsCellDirty(x, y int) bool {
 	if x < 0 || x >= b.width || y < 0 || y >= b.height {
 		return false
 	}
-	return b.dirty[y*b.width+x]
+	if b.dirtyAll {
+		return true
+	}
+	return b.dirtyStamp[y*b.width+x] == b.dirtyGen
 }
 
 // ForEachDirtyCell calls fn for each dirty cell.
 // More efficient than iterating all cells when few are dirty.
 func (b *Buffer) ForEachDirtyCell(fn func(x, y int, cell Cell)) {
+	if b.dirtyAll {
+		for y := 0; y < b.height; y++ {
+			rowStart := y * b.width
+			for x := 0; x < b.width; x++ {
+				idx := rowStart + x
+				fn(x, y, b.cells[idx])
+			}
+		}
+		return
+	}
 	if b.dirtyCount == 0 {
 		return
 	}
@@ -409,7 +431,7 @@ func (b *Buffer) ForEachDirtyCell(fn func(x, y int, cell Cell)) {
 		for y := 0; y < b.height; y++ {
 			for x := 0; x < b.width; x++ {
 				idx := y*b.width + x
-				if b.dirty[idx] {
+				if b.dirtyStamp[idx] == b.dirtyGen {
 					fn(x, y, b.cells[idx])
 				}
 			}
@@ -420,6 +442,9 @@ func (b *Buffer) ForEachDirtyCell(fn func(x, y int, cell Cell)) {
 		rectArea := b.dirtyRect.Width * b.dirtyRect.Height
 		if rectArea > b.dirtyCount*2 {
 			for _, idx := range b.dirtyIndices {
+				if b.dirtyStamp[idx] != b.dirtyGen {
+					continue
+				}
 				y := idx / b.width
 				x := idx - y*b.width
 				fn(x, y, b.cells[idx])
@@ -432,12 +457,52 @@ func (b *Buffer) ForEachDirtyCell(fn func(x, y int, cell Cell)) {
 		start := y*b.width + b.dirtyRect.X
 		end := y*b.width + min(b.width, b.dirtyRect.X+b.dirtyRect.Width)
 		for idx := start; idx < end; idx++ {
-			if b.dirty[idx] {
+			if b.dirtyStamp[idx] == b.dirtyGen {
 				x := idx - y*b.width
 				fn(x, y, b.cells[idx])
 			}
 		}
 	}
+}
+
+// ForEachDirtySpan calls fn for each contiguous dirty span per row.
+func (b *Buffer) ForEachDirtySpan(fn func(y, startX, endX int)) {
+	if b.dirtyAll {
+		for y := 0; y < b.height; y++ {
+			fn(y, 0, b.width)
+		}
+		return
+	}
+	if b.dirtyCount == 0 {
+		return
+	}
+	rect := b.dirtyRect
+	if rect.Width <= 0 || rect.Height <= 0 {
+		return
+	}
+	xEnd := min(b.width, rect.X+rect.Width)
+	yEnd := min(b.height, rect.Y+rect.Height)
+	for y := rect.Y; y < yEnd; y++ {
+		rowStart := y * b.width
+		x := rect.X
+		for x < xEnd {
+			if b.dirtyStamp[rowStart+x] != b.dirtyGen {
+				x++
+				continue
+			}
+			start := x
+			x++
+			for x < xEnd && b.dirtyStamp[rowStart+x] == b.dirtyGen {
+				x++
+			}
+			fn(y, start, x)
+		}
+	}
+}
+
+// Cells returns the underlying cell slice.
+func (b *Buffer) Cells() []Cell {
+	return b.cells
 }
 
 func calcDirtyListCap(total int) int {
@@ -455,4 +520,12 @@ func calcDirtyListCap(total int) int {
 		capacity = total
 	}
 	return capacity
+}
+
+func (b *Buffer) advanceDirtyGen() {
+	b.dirtyGen++
+	if b.dirtyGen == 0 {
+		clear(b.dirtyStamp)
+		b.dirtyGen = 1
+	}
 }

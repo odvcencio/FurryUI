@@ -22,6 +22,10 @@ type Tree struct {
 	offset        int
 	style         backend.Style
 	selectedStyle backend.Style
+	indentCache   []string
+	flatCache     []treeRow
+	flatDirty     bool
+	rootRef       *TreeNode
 }
 
 // NewTree creates a tree widget.
@@ -31,7 +35,19 @@ func NewTree(root *TreeNode) *Tree {
 		selectedIndex: 0,
 		style:         backend.DefaultStyle(),
 		selectedStyle: backend.DefaultStyle().Reverse(true),
+		flatDirty:     true,
+		rootRef:       root,
 	}
+}
+
+// SetRoot updates the tree root and clears cached rows.
+func (t *Tree) SetRoot(root *TreeNode) {
+	if t == nil {
+		return
+	}
+	t.Root = root
+	t.rootRef = root
+	t.flatDirty = true
 }
 
 // Measure returns desired size.
@@ -90,10 +106,7 @@ func (t *Tree) Render(ctx runtime.RenderContext) {
 		} else {
 			prefix = "  "
 		}
-		indent := ""
-		for j := 0; j < row.depth; j++ {
-			indent += "  "
-		}
+		indent := t.indent(row.depth)
 		line := indent + prefix + row.node.Label
 		line = truncateString(line, bounds.Width)
 		writePadded(ctx.Buffer, bounds.X, bounds.Y+i, bounds.Width, line, style)
@@ -120,16 +133,19 @@ func (t *Tree) HandleMessage(msg runtime.Message) runtime.HandleResult {
 	case terminal.KeyLeft:
 		if row := t.selectedRow(rows); row != nil && row.node.Expanded {
 			row.node.Expanded = false
+			t.flatDirty = true
 		}
 		return runtime.Handled()
 	case terminal.KeyRight:
 		if row := t.selectedRow(rows); row != nil && len(row.node.Children) > 0 {
 			row.node.Expanded = true
+			t.flatDirty = true
 		}
 		return runtime.Handled()
 	case terminal.KeyEnter:
 		if row := t.selectedRow(rows); row != nil && len(row.node.Children) > 0 {
 			row.node.Expanded = !row.node.Expanded
+			t.flatDirty = true
 		}
 		return runtime.Handled()
 	}
@@ -145,7 +161,14 @@ func (t *Tree) flatten() []treeRow {
 	if t == nil || t.Root == nil {
 		return nil
 	}
-	var rows []treeRow
+	if t.rootRef != t.Root {
+		t.rootRef = t.Root
+		t.flatDirty = true
+	}
+	if !t.flatDirty {
+		return t.flatCache
+	}
+	rows := t.flatCache[:0]
 	var walk func(node *TreeNode, depth int)
 	walk = func(node *TreeNode, depth int) {
 		if node == nil {
@@ -159,7 +182,9 @@ func (t *Tree) flatten() []treeRow {
 		}
 	}
 	walk(t.Root, 0)
-	return rows
+	t.flatCache = rows
+	t.flatDirty = false
+	return t.flatCache
 }
 
 func (t *Tree) setSelected(index int, count int) {
@@ -215,6 +240,19 @@ func (t *Tree) PageBy(pages int) {
 	}
 	t.setSelected(t.selectedIndex+pages*pageSize, len(rows))
 	t.Invalidate()
+}
+
+func (t *Tree) indent(depth int) string {
+	if depth <= 0 {
+		return ""
+	}
+	if len(t.indentCache) == 0 {
+		t.indentCache = []string{""}
+	}
+	for len(t.indentCache) <= depth {
+		t.indentCache = append(t.indentCache, t.indentCache[len(t.indentCache)-1]+"  ")
+	}
+	return t.indentCache[depth]
 }
 
 // ScrollToStart scrolls to the first row.
