@@ -633,7 +633,9 @@ func (h *heroDemo) Render(ctx runtime.RenderContext) {
 	}
 
 	featureY := startY + 10
-	visibleFeatures := (h.frame / 15) % (len(features) + 1)
+	// Features appear quickly one by one and stay visible
+	// At 30fps: frame 0-9 = 0, 10-19 = 1, 20-29 = 2, 30-39 = 3, 40+ = all 4
+	visibleFeatures := h.frame / 10
 	if visibleFeatures > len(features) {
 		visibleFeatures = len(features)
 	}
