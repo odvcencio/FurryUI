@@ -4,7 +4,8 @@
 // which doesn't require a real terminal. Perfect for CI/CD pipelines.
 //
 // Usage:
-//   go run ./examples/generate-demos --out docs/demos
+//
+//	go run ./examples/generate-demos --out docs/demos
 package main
 
 import (
@@ -67,7 +68,7 @@ func main() {
 	fmt.Println("\nTo view recordings:")
 	fmt.Printf("  asciinema play %s/hero.cast\n", *outDir)
 	fmt.Println("\nTo convert to GIF (requires agg):")
-	fmt.Printf("  agg --theme monokai %s/hero.cast %s/hero.gif\n", *outDir, *outDir)
+	fmt.Printf("  agg --theme monokai --last-frame-duration 0.001 %s/hero.cast %s/hero.gif\n", *outDir, *outDir)
 }
 
 func recordDemo(path string, root runtime.Widget) error {
@@ -658,44 +659,55 @@ func (h *heroDemo) Render(ctx runtime.RenderContext) {
 }
 
 func (h *heroDemo) drawRainbowBorder(ctx runtime.RenderContext, bounds runtime.Rect) {
-	// Calculate total perimeter positions
 	width := bounds.Width
 	height := bounds.Height
+	if width <= 0 || height <= 0 {
+		return
+	}
+	patternLen := len(borderChars) * len(rainbowColors)
+	if patternLen == 0 {
+		return
+	}
+
+	draw := func(x, y, offset int) {
+		pos := (offset + h.frame) % patternLen
+		char := borderChars[pos%len(borderChars)]
+		color := rainbowColors[(pos/2)%len(rainbowColors)]
+		style := backend.DefaultStyle().Foreground(color).Bold(true)
+		ctx.Buffer.Set(x, y, char, style)
+	}
 
 	// Top edge (left to right)
 	for i := 0; i < width; i++ {
-		pos := (i + h.frame) % (len(borderChars) * len(rainbowColors))
-		char := borderChars[pos%len(borderChars)]
-		color := rainbowColors[(pos/2)%len(rainbowColors)]
-		style := backend.DefaultStyle().Foreground(color).Bold(true)
-		ctx.Buffer.Set(bounds.X+i, bounds.Y, char, style)
+		draw(bounds.X+i, bounds.Y, i)
 	}
 
-	// Bottom edge (left to right)
-	for i := 0; i < width; i++ {
-		pos := (i - h.frame + 1000) % (len(borderChars) * len(rainbowColors)) // Reverse direction
-		char := borderChars[pos%len(borderChars)]
-		color := rainbowColors[(pos/2)%len(rainbowColors)]
-		style := backend.DefaultStyle().Foreground(color).Bold(true)
-		ctx.Buffer.Set(bounds.X+i, bounds.Y+height-1, char, style)
-	}
-
-	// Left edge (top to bottom)
-	for i := 1; i < height-1; i++ {
-		pos := (i + h.frame) % (len(borderChars) * len(rainbowColors))
-		char := borderChars[pos%len(borderChars)]
-		color := rainbowColors[(pos/2)%len(rainbowColors)]
-		style := backend.DefaultStyle().Foreground(color).Bold(true)
-		ctx.Buffer.Set(bounds.X, bounds.Y+i, char, style)
+	sideLen := height - 2
+	if sideLen < 0 {
+		sideLen = 0
 	}
 
 	// Right edge (top to bottom)
-	for i := 1; i < height-1; i++ {
-		pos := (i - h.frame + 1000) % (len(borderChars) * len(rainbowColors)) // Reverse direction
-		char := borderChars[pos%len(borderChars)]
-		color := rainbowColors[(pos/2)%len(rainbowColors)]
-		style := backend.DefaultStyle().Foreground(color).Bold(true)
-		ctx.Buffer.Set(bounds.X+width-1, bounds.Y+i, char, style)
+	for i := 0; i < sideLen; i++ {
+		draw(bounds.X+width-1, bounds.Y+1+i, width+i)
+	}
+
+	// Bottom edge (right to left)
+	if height > 1 {
+		base := width + sideLen
+		for i := 0; i < width; i++ {
+			x := bounds.X + width - 1 - i
+			draw(x, bounds.Y+height-1, base+i)
+		}
+	}
+
+	// Left edge (bottom to top)
+	if width > 1 {
+		base := width + sideLen + width
+		for i := 0; i < sideLen; i++ {
+			y := bounds.Y + height - 2 - i
+			draw(bounds.X, y, base+i)
+		}
 	}
 }
 

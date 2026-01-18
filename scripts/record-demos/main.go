@@ -33,6 +33,8 @@ const (
 	colorRed    = "\033[0;31m"
 )
 
+const aggLastFrameDuration = "0.001"
+
 var (
 	outDir     = flag.String("out", "docs/demos", "output directory for recordings")
 	duration   = flag.Duration("duration", 5*time.Second, "recording duration per demo")
@@ -183,7 +185,7 @@ func main() {
 	fmt.Printf("  asciinema play %s/quickstart.cast\n", demosDir)
 	fmt.Println()
 	fmt.Println("To convert to GIF (requires agg):")
-	fmt.Printf("  agg --theme monokai %s/quickstart.cast %s/quickstart.gif\n", demosDir, demosDir)
+	fmt.Printf("  agg --theme %s --last-frame-duration %s %s/quickstart.cast %s/quickstart.gif\n", *aggTheme, aggLastFrameDuration, demosDir, demosDir)
 	fmt.Println()
 	fmt.Println("To convert to MP4 (requires agg + ffmpeg):")
 	fmt.Printf("  agg %s/quickstart.cast /tmp/quickstart.webm\n", demosDir)
@@ -232,7 +234,7 @@ func convertToGif(aggBin, castFile, gifFile string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	args := []string{"--theme", *aggTheme, "--font-size", "14", castFile, gifFile}
+	args := []string{"--theme", *aggTheme, "--font-size", "14", "--last-frame-duration", aggLastFrameDuration, castFile, gifFile}
 	cmd := exec.CommandContext(ctx, aggBin, args...)
 
 	if *verbose {

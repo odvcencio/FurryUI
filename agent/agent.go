@@ -4,6 +4,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -18,22 +19,22 @@ import (
 
 // Common errors returned by Agent methods.
 var (
-	ErrWidgetNotFound  = errors.New("widget not found")
-	ErrWidgetDisabled  = errors.New("widget is disabled")
-	ErrNotFocusable    = errors.New("widget is not focusable")
-	ErrNotInteractive  = errors.New("widget is not interactive")
-	ErrTimeout         = errors.New("operation timed out")
-	ErrNoApp           = errors.New("no app configured")
+	ErrWidgetNotFound = errors.New("widget not found")
+	ErrWidgetDisabled = errors.New("widget is disabled")
+	ErrNotFocusable   = errors.New("widget is not focusable")
+	ErrNotInteractive = errors.New("widget is not interactive")
+	ErrTimeout        = errors.New("operation timed out")
+	ErrNoApp          = errors.New("no app configured")
 )
 
 // Agent provides AI-friendly interaction with a FluffyUI application.
 // It wraps a simulation backend and exposes semantic operations over
 // the widget tree.
 type Agent struct {
-	mu      sync.Mutex
-	app     *runtime.App
-	sim     *sim.Backend
-	screen  *runtime.Screen
+	mu       sync.Mutex
+	app      *runtime.App
+	sim      *sim.Backend
+	screen   *runtime.Screen
 	tickRate time.Duration
 }
 
@@ -143,8 +144,8 @@ func (a *Agent) Snapshot() Snapshot {
 	snap.LayerCount = a.screen.LayerCount()
 
 	// Walk widget tree
-	if root := a.screen.Root(); root != nil {
-		a.walkWidgets(root, &snap.Widgets, nil)
+	if top := a.screen.TopLayer(); top != nil && top.Root != nil {
+		a.walkWidgets(top.Root, &snap.Widgets)
 	}
 
 	// Find focused widget
@@ -164,7 +165,7 @@ func (a *Agent) Snapshot() Snapshot {
 }
 
 // walkWidgets recursively collects widget info from the tree.
-func (a *Agent) walkWidgets(w runtime.Widget, out *[]WidgetInfo, parent *WidgetInfo) {
+func (a *Agent) walkWidgets(w runtime.Widget, out *[]WidgetInfo) {
 	if w == nil {
 		return
 	}
@@ -175,7 +176,7 @@ func (a *Agent) walkWidgets(w runtime.Widget, out *[]WidgetInfo, parent *WidgetI
 	if cp, ok := w.(runtime.ChildProvider); ok {
 		children := cp.ChildWidgets()
 		for _, child := range children {
-			a.walkWidgets(child, &info.Children, &info)
+			a.walkWidgets(child, &info.Children)
 		}
 	}
 
@@ -202,6 +203,22 @@ func (a *Agent) extractWidgetInfo(w runtime.Widget) WidgetInfo {
 		if val := acc.AccessibleValue(); val != nil {
 			info.Value = val.Text
 			info.ValueInfo = val
+		}
+	}
+
+	// Infer textbox role/value from focusable text widgets when accessibility is missing.
+	if info.Role == "" {
+		if f, ok := w.(runtime.Focusable); ok && f.CanFocus() {
+			if textWidget, ok := w.(interface{ Text() string }); ok {
+				info.Role = accessibility.RoleTextbox
+				info.Value = textWidget.Text()
+			}
+		}
+	}
+
+	if info.Value == "" {
+		if textWidget, ok := w.(interface{ Text() string }); ok {
+			info.Value = textWidget.Text()
 		}
 	}
 
@@ -278,6 +295,11 @@ func (a *Agent) FindByRole(role accessibility.Role) []WidgetInfo {
 	return results
 }
 
+// FindByType is an alias for FindByRole.
+func (a *Agent) FindByType(role accessibility.Role) []WidgetInfo {
+	return a.FindByRole(role)
+}
+
 func findByRoleIn(widgets []WidgetInfo, role accessibility.Role, out *[]WidgetInfo) {
 	for _, w := range widgets {
 		if w.Role == role {
@@ -342,6 +364,181 @@ func (a *Agent) GetValue(label string) (string, error) {
 	return w.Value, nil
 }
 
+// SnapshotJSON returns the current snapshot serialized to JSON.
+func (a *Agent) SnapshotJSON() ([]byte, error) {
+	snap := a.Snapshot()
+	return json.MarshalIndent(snap, "", "  ")
+}
+
+// FocusWidget focuses the widget with the given label.
+func (a *Agent) FocusWidget(label string) error {
+	return a.Focus(label)
+}
+
+// Focus moves focus to the widget with the given label.
+func (a *Agent) Focus(label string) error {
+	info := a.FindByLabel(label)
+	if info == nil {
+		return ErrWidgetNotFound
+	}
+	if info.State.Disabled {
+		return ErrWidgetDisabled
+	}
+	return a.focusByID(info.ID)
+}
+
+// ActivateWidget activates the widget with the given label.
+func (a *Agent) ActivateWidget(label string) error {
+	return a.Activate(label)
+}
+
+// Activate focuses and activates the widget with the given label.
+func (a *Agent) Activate(label string) error {
+	info := a.FindByLabel(label)
+	if info == nil {
+		return ErrWidgetNotFound
+	}
+	if info.State.Disabled {
+		return ErrWidgetDisabled
+	}
+	if err := a.focusByID(info.ID); err != nil {
+		return err
+	}
+	if err := a.sendKey(terminal.KeyEnter, 0); err != nil {
+		return err
+	}
+	a.Tick()
+	return nil
+}
+
+// TypeInto focuses the widget and types the given text.
+func (a *Agent) TypeInto(label, text string) error {
+	return a.Type(label, text)
+}
+
+// Type focuses the widget and types the given text.
+func (a *Agent) Type(label, text string) error {
+	info := a.FindByLabel(label)
+	if info == nil {
+		return ErrWidgetNotFound
+	}
+	if info.State.Disabled {
+		return ErrWidgetDisabled
+	}
+	if err := a.focusByID(info.ID); err != nil {
+		return err
+	}
+	if err := a.sendText(text); err != nil {
+		return err
+	}
+	a.Tick()
+	return nil
+}
+
+// Select focuses the widget and selects the option by label.
+func (a *Agent) Select(label, option string) error {
+	info := a.FindByLabel(label)
+	if info == nil {
+		return ErrWidgetNotFound
+	}
+	if info.State.Disabled {
+		return ErrWidgetDisabled
+	}
+
+	w, acc, err := a.focusWidgetByID(info.ID)
+	if err != nil {
+		return err
+	}
+	if acc == nil {
+		return ErrNotInteractive
+	}
+
+	current := acc.AccessibleLabel()
+	if strings.EqualFold(current, option) {
+		return nil
+	}
+
+	seen := map[string]bool{current: true}
+	for i := 0; i < 100; i++ {
+		if err := a.sendKey(terminal.KeyDown, 0); err != nil {
+			return err
+		}
+		a.Tick()
+		current = acc.AccessibleLabel()
+		if strings.EqualFold(current, option) {
+			_ = w
+			return nil
+		}
+		if seen[current] {
+			break
+		}
+		seen[current] = true
+	}
+	return ErrWidgetNotFound
+}
+
+// SendKey injects a key into the app.
+func (a *Agent) SendKey(key terminal.Key) error {
+	if err := a.sendKey(key, 0); err != nil {
+		return err
+	}
+	a.Tick()
+	return nil
+}
+
+// SendKeyRune injects a key with rune payload.
+func (a *Agent) SendKeyRune(key terminal.Key, r rune) error {
+	if err := a.sendKey(key, r); err != nil {
+		return err
+	}
+	a.Tick()
+	return nil
+}
+
+// SendKeyString injects a string as a sequence of key events.
+func (a *Agent) SendKeyString(text string) error {
+	if err := a.sendText(text); err != nil {
+		return err
+	}
+	a.Tick()
+	return nil
+}
+
+// WaitForText waits until text appears on screen or timeout occurs.
+func (a *Agent) WaitForText(text string, timeout time.Duration) error {
+	if a == nil {
+		return ErrNoApp
+	}
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if a.ContainsText(text) {
+			return nil
+		}
+		a.Tick()
+	}
+	return ErrTimeout
+}
+
+// WaitForWidget waits until a widget with the given label is present.
+func (a *Agent) WaitForWidget(label string, timeout time.Duration) error {
+	if a == nil {
+		return ErrNoApp
+	}
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if a.FindByLabel(label) != nil {
+			return nil
+		}
+		a.Tick()
+	}
+	return ErrTimeout
+}
+
+// ListWidgets returns widgets that match the given role.
+func (a *Agent) ListWidgets(role accessibility.Role) []WidgetInfo {
+	return a.FindByRole(role)
+}
+
 // ContainsText checks if the given text appears on screen.
 func (a *Agent) ContainsText(text string) bool {
 	if a == nil || a.sim == nil {
@@ -364,4 +561,116 @@ func (a *Agent) CaptureText() string {
 		return ""
 	}
 	return a.sim.Capture()
+}
+
+func (a *Agent) sendKey(key terminal.Key, r rune) error {
+	if a == nil {
+		return ErrNoApp
+	}
+	a.mu.Lock()
+	simBackend := a.sim
+	app := a.app
+	a.mu.Unlock()
+
+	if simBackend != nil {
+		simBackend.InjectKey(key, r)
+		return nil
+	}
+	if app != nil {
+		app.Post(runtime.KeyMsg{Key: key, Rune: r})
+		return nil
+	}
+	return ErrNoApp
+}
+
+func (a *Agent) sendText(text string) error {
+	if a == nil {
+		return ErrNoApp
+	}
+	for _, r := range text {
+		switch r {
+		case '\n':
+			if err := a.sendKey(terminal.KeyEnter, 0); err != nil {
+				return err
+			}
+		case '\t':
+			if err := a.sendKey(terminal.KeyTab, 0); err != nil {
+				return err
+			}
+		default:
+			if err := a.sendKey(terminal.KeyRune, r); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (a *Agent) focusByID(id string) error {
+	_, _, err := a.focusWidgetByID(id)
+	return err
+}
+
+func (a *Agent) focusWidgetByID(id string) (runtime.Widget, accessibility.Accessible, error) {
+	a.mu.Lock()
+	screen := a.screen
+	a.mu.Unlock()
+	if screen == nil {
+		return nil, nil, ErrNoApp
+	}
+	layer := screen.TopLayer()
+	if layer == nil || layer.Root == nil {
+		return nil, nil, ErrNoApp
+	}
+
+	w := findWidgetByID(layer.Root, id)
+	if w == nil {
+		return nil, nil, ErrWidgetNotFound
+	}
+	focusable, ok := w.(runtime.Focusable)
+	if !ok || !focusable.CanFocus() {
+		return w, accessibleFromWidget(w), ErrNotFocusable
+	}
+
+	scope := screen.FocusScope()
+	if scope == nil {
+		return w, accessibleFromWidget(w), ErrNotFocusable
+	}
+
+	if !scope.SetFocus(focusable) {
+		scope.Reset()
+		runtime.RegisterFocusables(scope, layer.Root)
+		if !scope.SetFocus(focusable) {
+			return w, accessibleFromWidget(w), ErrNotFocusable
+		}
+	}
+
+	return w, accessibleFromWidget(w), nil
+}
+
+func accessibleFromWidget(w runtime.Widget) accessibility.Accessible {
+	if w == nil {
+		return nil
+	}
+	if acc, ok := w.(accessibility.Accessible); ok {
+		return acc
+	}
+	return nil
+}
+
+func findWidgetByID(w runtime.Widget, id string) runtime.Widget {
+	if w == nil {
+		return nil
+	}
+	if widgetID(w) == id {
+		return w
+	}
+	if cp, ok := w.(runtime.ChildProvider); ok {
+		for _, child := range cp.ChildWidgets() {
+			if found := findWidgetByID(child, id); found != nil {
+				return found
+			}
+		}
+	}
+	return nil
 }

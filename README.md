@@ -404,7 +404,7 @@ go run ./scripts/record-demos --duration 5s
 go run ./scripts/record-demos --demo quickstart,counter
 
 # Convert to GIF (requires agg: cargo install --git https://github.com/asciinema/agg)
-agg --theme monokai docs/demos/hero.cast docs/demos/hero.gif
+agg --theme monokai --last-frame-duration 0.001 docs/demos/hero.cast docs/demos/hero.gif
 ```
 
 ## Documentation
